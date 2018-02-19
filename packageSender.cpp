@@ -19,7 +19,8 @@ frame_id(0), subframe_id(0)
     memset(servaddr_.sin_zero, 0, sizeof(servaddr_.sin_zero));  
 
     /*Bind socket with address struct*/
-    bind(socket_, (struct sockaddr *) &servaddr_, sizeof(servaddr_));
+    if(bind(socket_, (struct sockaddr *) &servaddr_, sizeof(servaddr_)) != 0)
+        perror("socket bind failed");
 
     /* initialize random seed: */
     srand (time(NULL));
@@ -50,7 +51,7 @@ void PackageSender::genData()
             IQ_data[k] = rand() / (float) RAND_MAX;
         memcpy(IQ_data, IQ_data + (OFDM_FRAME_LEN - OFDM_PREFIX_LEN) * 2, sizeof(float) * OFDM_PREFIX_LEN * 2); // prefix
 */
-      
+
         //printf("copy IQ\n");
         memcpy(buffer_[j].data() + data_offset, (char *)IQ_data, sizeof(float) * OFDM_FRAME_LEN * 2);   
     }

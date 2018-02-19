@@ -9,3 +9,6 @@ set(CMAKE_CXX_FLAGS "-w -O3 -mavx -mavx2 -msse2")
 
 add_executable(sender sender_cli.cpp packageSender.cpp)
 target_link_libraries(sender -lpthread)
+
+add_executable(CoMP main.cpp packageReceiver.cpp)
+target_link_libraries(CoMP -lpthread)
