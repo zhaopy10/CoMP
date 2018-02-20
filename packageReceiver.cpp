@@ -25,6 +25,12 @@ PackageReceiver::PackageReceiver()
 
 }
 
+PackageReceiver::PackageReceiver(int* in_pipe):
+PackageReceiver()
+{
+    pipe_ = in_pipe;
+}
+
 PackageReceiver::~PackageReceiver()
 {
 }
@@ -38,7 +44,7 @@ pthread_t PackageReceiver::startRecv(char* in_buffer, int* in_buffer_status, int
     buffer_ = in_buffer;  // for save data
     buffer_status_ = in_buffer_status; // for save status
 
-    printf("start Recv thread\n");
+    //printf("start Recv thread\n");
     // new thread
     pthread_t recv_thread_;
     if(pthread_create( &recv_thread_, NULL, PackageReceiver::loopRecv, (void *)this) != 0)
@@ -51,18 +57,21 @@ pthread_t PackageReceiver::startRecv(char* in_buffer, int* in_buffer_status, int
 
 void* PackageReceiver::loopRecv(void *context)
 {
-    printf("thread start\n");
+    printf("package receiver thread start\n");
     PackageReceiver* obj_ptr = (PackageReceiver *)context;
     char* buffer = obj_ptr->buffer_;
     int* buffer_status = obj_ptr->buffer_status_;
     int buffer_length = obj_ptr->buffer_length_;
     int buffer_frame_num = obj_ptr->buffer_frame_num_;
-
+    int* pipe = obj_ptr->pipe_;
 
     char* cur_ptr_buffer = buffer;
     int* cur_ptr_buffer_status = buffer_status;
     // loop recv
     socklen_t addrlen = sizeof(obj_ptr->servaddr_);
+    int offset = 0;
+    int package_num = 0;
+    clock_t begin = clock();
     while(true)
     {
         if(cur_ptr_buffer_status[0] == 1)
@@ -82,12 +91,27 @@ void* PackageReceiver::loopRecv(void *context)
         subframe_id = *((int *)cur_ptr_buffer + 1);
         cell_id = *((int *)cur_ptr_buffer + 2);
         ant_id = *((int *)cur_ptr_buffer + 3);
-        printf("frame_id %d, subframe_id %d, cell_id %d, ant_id %d\n", frame_id, subframe_id, cell_id, ant_id);
-
+        //printf("receive frame_id %d, subframe_id %d, cell_id %d, ant_id %d\n", frame_id, subframe_id, cell_id, ant_id);
+        
+        offset = cur_ptr_buffer_status - buffer_status;
         // move ptr
-        //cur_ptr_buffer_status[0] = 1; // has data, after doing fft, it is set to false
+        cur_ptr_buffer_status[0] = 1; // has data, after doing fft, it is set to false
         cur_ptr_buffer_status = buffer_status + (cur_ptr_buffer_status - buffer_status + 1) % buffer_frame_num;
         cur_ptr_buffer = buffer + (cur_ptr_buffer - buffer + package_length) % buffer_length;
+
+        // write pipe
+        write(pipe[1], (char *)&offset, sizeof(int));
+
+        package_num++;
+        if(package_num == 1e5)
+        {
+            clock_t end = clock();
+            double byte_len = sizeof(float) * OFDM_FRAME_LEN * 2 * 1e5;
+            double elapsed_secs = double(end - begin) / CLOCKS_PER_SEC;
+            printf("receive %f bytes in %f secs, throughput %f MB/s\n", byte_len, elapsed_secs, byte_len / elapsed_secs / 1024 / 1024);
+            begin = clock();
+            package_num = 0;
+        }
     }
 
 }

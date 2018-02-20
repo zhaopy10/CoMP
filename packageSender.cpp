@@ -46,11 +46,12 @@ void PackageSender::genData()
         memcpy(buffer_[j].data() + sizeof(int), (char *)&subframe_id, sizeof(int));
         memcpy(buffer_[j].data() + sizeof(int) * 2, (char *)&cell_id, sizeof(int));
         memcpy(buffer_[j].data() + sizeof(int) * 3, (char *)&j, sizeof(int));
-/*
-        for (int k = OFDM_PREFIX_LEN * 2; k < OFDM_FRAME_LEN * 2; k++)    // gen data
+
+        int test_length = OFDM_FRAME_LEN * 2 - OFDM_CA_NUM * 2 * 0.4;
+        for (int k = OFDM_PREFIX_LEN * 2; k < test_length; k++)    // gen data
             IQ_data[k] = rand() / (float) RAND_MAX;
         memcpy(IQ_data, IQ_data + (OFDM_FRAME_LEN - OFDM_PREFIX_LEN) * 2, sizeof(float) * OFDM_PREFIX_LEN * 2); // prefix
-*/
+
 
         //printf("copy IQ\n");
         memcpy(buffer_[j].data() + data_offset, (char *)IQ_data, sizeof(float) * OFDM_FRAME_LEN * 2);   
@@ -70,7 +71,7 @@ void PackageSender::genData()
 void PackageSender::loopSend()
 {
     clock_t begin = clock();
-    const int info_interval = 1e2;
+    const int info_interval = 1e1;
     std::vector<int> ant_seq = std::vector<int>(buffer_.size());
     for (int i = 0; i < ant_seq.size(); ++i)
         ant_seq[i] = i;
@@ -80,9 +81,10 @@ void PackageSender::loopSend()
     {
         this->genData(); // generate data
         //printf("genData\n");
-        std::random_shuffle ( ant_seq.begin(), ant_seq.end() ); // random perm
+        //std::random_shuffle ( ant_seq.begin(), ant_seq.end() ); // random perm
         for (int i = 0; i < buffer_.size(); ++i)
         {
+            //usleep(10);
             /* send a message to the server */
             if (sendto(this->socket_, this->buffer_[ant_seq[i]].data(), this->buffer_length, 0, (struct sockaddr *)&servaddr_, sizeof(servaddr_)) < 0) {
                 perror("socket sendto failed");
@@ -93,7 +95,7 @@ void PackageSender::loopSend()
         if ((frame_id+1) % info_interval == 0 && subframe_id == 0)
         {
             clock_t end = clock();
-            double byte_len = sizeof(float) * OFDM_PREFIX_LEN * 2 * BS_ANT_NUM * subframe_num_perframe * info_interval;
+            double byte_len = sizeof(float) * OFDM_FRAME_LEN * 2 * BS_ANT_NUM * subframe_num_perframe * info_interval;
             double elapsed_secs = double(end - begin) / CLOCKS_PER_SEC;
             printf("transmit %f bytes in %f secs, throughput %f MB/s\n", byte_len, elapsed_secs, byte_len / elapsed_secs / 1024 / 1024);
             begin = clock();

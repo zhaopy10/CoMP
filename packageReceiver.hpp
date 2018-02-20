@@ -16,6 +16,7 @@
 #include <numeric>
 #include <pthread.h>
 #include <cassert>
+ #include <unistd.h>
 
 class PackageReceiver
 {
@@ -26,11 +27,11 @@ public:
     // float for: I/Q samples
     static const int package_length = sizeof(int) * 4 + sizeof(float) * OFDM_FRAME_LEN * 2;
     static const int data_offset = sizeof(int) * 4;
-    static const int subframe_num_perframe = 40;
     static const int MAX_FRAME_ID = 1e4;
 
 public:
     PackageReceiver();
+    PackageReceiver(int* in_pipe);
     ~PackageReceiver();
 
     pthread_t startRecv(char* in_buffer, int* in_buffer_status, int in_buffer_frame_num, int in_buffer_length);
@@ -44,6 +45,8 @@ private:
     int* buffer_status_;
     int buffer_length_;
     int buffer_frame_num_;
+
+    int* pipe_;  // write at port 1
 };
 
 
