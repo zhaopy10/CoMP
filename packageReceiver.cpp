@@ -71,7 +71,7 @@ void* PackageReceiver::loopRecv(void *context)
     socklen_t addrlen = sizeof(obj_ptr->servaddr_);
     int offset = 0;
     int package_num = 0;
-    clock_t begin = clock();
+    auto begin = std::chrono::system_clock::now();
     while(true)
     {
         if(cur_ptr_buffer_status[0] == 1)
@@ -105,11 +105,11 @@ void* PackageReceiver::loopRecv(void *context)
         package_num++;
         if(package_num == 1e5)
         {
-            clock_t end = clock();
+            auto end = std::chrono::system_clock::now();
             double byte_len = sizeof(float) * OFDM_FRAME_LEN * 2 * 1e5;
-            double elapsed_secs = double(end - begin) / CLOCKS_PER_SEC;
-            printf("receive %f bytes in %f secs, throughput %f MB/s\n", byte_len, elapsed_secs, byte_len / elapsed_secs / 1024 / 1024);
-            begin = clock();
+            std::chrono::duration<double> diff = end - begin;
+            printf("receive %f bytes in %f secs, throughput %f MB/s\n", byte_len, diff.count(), byte_len / diff.count() / 1024 / 1024);
+            begin = std::chrono::system_clock::now();
             package_num = 0;
         }
     }

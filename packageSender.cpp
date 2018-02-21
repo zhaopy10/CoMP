@@ -70,7 +70,8 @@ void PackageSender::genData()
 
 void PackageSender::loopSend()
 {
-    clock_t begin = clock();
+    //clock_t begin = clock();
+    auto begin = std::chrono::system_clock::now();
     const int info_interval = 1e1;
     std::vector<int> ant_seq = std::vector<int>(buffer_.size());
     for (int i = 0; i < ant_seq.size(); ++i)
@@ -94,11 +95,14 @@ void PackageSender::loopSend()
         //printf("send frame %d, subframe %d\n", frame_id, subframe_id);
         if ((frame_id+1) % info_interval == 0 && subframe_id == 0)
         {
-            clock_t end = clock();
+            //clock_t end = clock();
+            auto end = std::chrono::system_clock::now();
             double byte_len = sizeof(float) * OFDM_FRAME_LEN * 2 * BS_ANT_NUM * subframe_num_perframe * info_interval;
-            double elapsed_secs = double(end - begin) / CLOCKS_PER_SEC;
-            printf("transmit %f bytes in %f secs, throughput %f MB/s\n", byte_len, elapsed_secs, byte_len / elapsed_secs / 1024 / 1024);
-            begin = clock();
+            //double elapsed_secs = double(end - begin) / CLOCKS_PER_SEC;
+            std::chrono::duration<double> diff = end - begin;
+            printf("transmit %f bytes in %f secs, throughput %f MB/s\n", byte_len, diff.count(), byte_len / diff.count() / 1024 / 1024);
+            //begin = clock();
+            begin = std::chrono::system_clock::now();
         }
     }
     
