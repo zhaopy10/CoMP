@@ -7,11 +7,25 @@
 #include <system_error>
 #include <pthread.h>
 #include <queue>
+#include "mufft/fft.h"
+#include <complex.h>
+#include <math.h>
+
+struct complex_float {
+    float real;
+    float imag;
+};
 
 struct SocketBuffer
 {
     std::vector<char> buffer;
     std::vector<int> buffer_status;
+};
+
+struct FFTBuffer
+{
+    complex_float ** FFT_inputs;
+    complex_float ** FFT_outputs;
 };
 
 //typename struct EventHandlerContext;
@@ -22,6 +36,9 @@ public:
     static const int MAX_EPOLL_EVENTS_PER_RUN = 1;
     static const int TASK_THREAD_NUM = 4;
     static const int MAX_EVENT_NUM = TASK_THREAD_NUM + 1;
+
+    static const int SOCKET_BUFFER_FRAME_NUM = 10; // buffer 10 frames
+    static const int TASK_BUFFER_FRAME_NUM = 2;
 
     CoMP();
     ~CoMP();
@@ -36,9 +53,13 @@ public:
         int id;
     };
 
+    inline int getFFTBufferIndex(int frame_id, int subframe_id, int ant_id);
+
 private:
     std::unique_ptr<PackageReceiver> receiver_;
     SocketBuffer socket_buffer_;
+    FFTBuffer fft_buffer_;
+    mufft_plan_1d* muplans_[TASK_THREAD_NUM];
 
     int epoll_fd;
     // A struct epoll_event for each process

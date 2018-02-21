@@ -26,9 +26,15 @@ frame_id(0), subframe_id(0)
     srand (time(NULL));
 
     IQ_data = new float[OFDM_FRAME_LEN * 2];
-    for (int k = OFDM_PREFIX_LEN * 2; k < OFDM_FRAME_LEN * 2; ++k)    
-        IQ_data[k] = rand() / (float) RAND_MAX;
-    memcpy(IQ_data, IQ_data + (OFDM_FRAME_LEN - OFDM_PREFIX_LEN) * 2, sizeof(float) * OFDM_PREFIX_LEN * 2); // prefix
+    //for (int k = OFDM_PREFIX_LEN * 2; k < OFDM_FRAME_LEN * 2; ++k)    
+    //    IQ_data[k] = rand() / (float) RAND_MAX;
+    //memcpy(IQ_data, IQ_data + (OFDM_FRAME_LEN - OFDM_PREFIX_LEN) * 2, sizeof(float) * OFDM_PREFIX_LEN * 2); // prefix
+
+    // read from file
+    FILE* fp = fopen("data.bin","rb");
+    fread(IQ_data, sizeof(float), OFDM_FRAME_LEN * 2, fp);
+    fclose(fp);
+
 }
 
 PackageSender::~PackageSender()
@@ -46,14 +52,11 @@ void PackageSender::genData()
         memcpy(buffer_[j].data() + sizeof(int), (char *)&subframe_id, sizeof(int));
         memcpy(buffer_[j].data() + sizeof(int) * 2, (char *)&cell_id, sizeof(int));
         memcpy(buffer_[j].data() + sizeof(int) * 3, (char *)&j, sizeof(int));
-
-        int test_length = OFDM_FRAME_LEN * 2 - OFDM_CA_NUM * 2 * 0.4;
-        for (int k = OFDM_PREFIX_LEN * 2; k < test_length; k++)    // gen data
-            IQ_data[k] = rand() / (float) RAND_MAX;
-        memcpy(IQ_data, IQ_data + (OFDM_FRAME_LEN - OFDM_PREFIX_LEN) * 2, sizeof(float) * OFDM_PREFIX_LEN * 2); // prefix
-
-
         //printf("copy IQ\n");
+        // waste some time
+        for(int p = 0; p < 2e3; p++)
+            rand();
+
         memcpy(buffer_[j].data() + data_offset, (char *)IQ_data, sizeof(float) * OFDM_FRAME_LEN * 2);   
     }
 
@@ -70,7 +73,6 @@ void PackageSender::genData()
 
 void PackageSender::loopSend()
 {
-    //clock_t begin = clock();
     auto begin = std::chrono::system_clock::now();
     const int info_interval = 1e1;
     std::vector<int> ant_seq = std::vector<int>(buffer_.size());
@@ -85,7 +87,7 @@ void PackageSender::loopSend()
         //std::random_shuffle ( ant_seq.begin(), ant_seq.end() ); // random perm
         for (int i = 0; i < buffer_.size(); ++i)
         {
-            //usleep(10);
+            //usleep(1);
             /* send a message to the server */
             if (sendto(this->socket_, this->buffer_[ant_seq[i]].data(), this->buffer_length, 0, (struct sockaddr *)&servaddr_, sizeof(servaddr_)) < 0) {
                 perror("socket sendto failed");
@@ -95,13 +97,10 @@ void PackageSender::loopSend()
         //printf("send frame %d, subframe %d\n", frame_id, subframe_id);
         if ((frame_id+1) % info_interval == 0 && subframe_id == 0)
         {
-            //clock_t end = clock();
             auto end = std::chrono::system_clock::now();
             double byte_len = sizeof(float) * OFDM_FRAME_LEN * 2 * BS_ANT_NUM * subframe_num_perframe * info_interval;
-            //double elapsed_secs = double(end - begin) / CLOCKS_PER_SEC;
             std::chrono::duration<double> diff = end - begin;
             printf("transmit %f bytes in %f secs, throughput %f MB/s\n", byte_len, diff.count(), byte_len / diff.count() / 1024 / 1024);
-            //begin = clock();
             begin = std::chrono::system_clock::now();
         }
     }

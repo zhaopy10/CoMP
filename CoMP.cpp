@@ -4,8 +4,23 @@ CoMP::CoMP()
 {
     // initialize socket buffer
     socket_buffer_.buffer.resize(PackageReceiver::package_length 
-        * subframe_num_perframe * BS_ANT_NUM * 10); // buffer entire frame
-    socket_buffer_.buffer_status.resize(subframe_num_perframe * BS_ANT_NUM * 10);
+        * subframe_num_perframe * BS_ANT_NUM * SOCKET_BUFFER_FRAME_NUM); // buffer entire frame
+    socket_buffer_.buffer_status.resize(subframe_num_perframe * BS_ANT_NUM * SOCKET_BUFFER_FRAME_NUM);
+
+    // initialize FFT buffer
+    int FFT_buffer_block_num = BS_ANT_NUM * subframe_num_perframe * TASK_BUFFER_FRAME_NUM;
+    fft_buffer_.FFT_inputs = new complex_float*[FFT_buffer_block_num];
+    fft_buffer_.FFT_outputs = new complex_float*[FFT_buffer_block_num];
+    for(int i = 0; i < FFT_buffer_block_num; i++)
+    {
+        fft_buffer_.FFT_inputs[i] = (complex_float *)mufft_alloc(OFDM_CA_NUM * sizeof(complex_float));
+        fft_buffer_.FFT_outputs[i] = (complex_float *)mufft_alloc(OFDM_CA_NUM * sizeof(complex_float));
+    }
+    for(int i = 0; i < TASK_THREAD_NUM; i++)
+    {
+        muplans_[i] = mufft_create_plan_1d_c2c(OFDM_CA_NUM, MUFFT_FORWARD, MUFFT_FLAG_CPU_ANY);
+    }
+
 
     // initialize pipes
     pipe(pipe_socket_);
@@ -62,7 +77,17 @@ CoMP::CoMP()
 
 CoMP::~CoMP()
 {
-
+    for(int i = 0; i < TASK_THREAD_NUM; i++)
+    {
+        mufft_free_plan_1d(muplans_[i]);
+    }
+    // release FFT_buffer
+    int FFT_buffer_block_num = BS_ANT_NUM * subframe_num_perframe * TASK_BUFFER_FRAME_NUM;
+    for(int i = 0; i < FFT_buffer_block_num; i++)
+    {
+        mufft_free(fft_buffer_.FFT_inputs[i]);
+        mufft_free(fft_buffer_.FFT_outputs[i]);
+    }
 }
 
 void CoMP::start()
@@ -116,7 +141,6 @@ void CoMP::start()
                 else // all thread are running
                 {
                     cropWaitList.push(offset);
-
                 }
                 
             }
@@ -126,7 +150,6 @@ void CoMP::start()
                 int tid = 0;
                 while(ev[i].data.fd != pipe_task_finish_[tid][0]) // find tid
                 {
-                    //printf("loop\n");
                     tid++;
                 }
                 //printf("tid %d finished\n", tid);
@@ -217,6 +240,12 @@ void* CoMP::taskThread(void* context)
     }
 }
 
+inline int CoMP::getFFTBufferIndex(int frame_id, int subframe_id, int ant_id)
+{
+    frame_id = frame_id % TASK_BUFFER_FRAME_NUM;
+    return frame_id * (BS_ANT_NUM * subframe_num_perframe) + subframe_id * BS_ANT_NUM + ant_id;
+}
+
 void CoMP::doCrop(int tid, int offset)
 {
     // read info
@@ -227,8 +256,35 @@ void CoMP::doCrop(int tid, int offset)
     cell_id = *((int *)cur_ptr_buffer + 2);
     ant_id = *((int *)cur_ptr_buffer + 3);
     //printf("thread %d process frame_id %d, subframe_id %d, cell_id %d, ant_id %d\n", tid, frame_id, subframe_id, cell_id, ant_id);
-    // do FFT
-    //usleep(3000000);
+    // remove CP, do FFT
+    int delay_offset = 0;
+    int FFT_buffer_target_id = getFFTBufferIndex(frame_id, subframe_id, ant_id);
+    memcpy((char *)fft_buffer_.FFT_inputs[FFT_buffer_target_id], 
+        cur_ptr_buffer + sizeof(int) * 4 + (OFDM_PREFIX_LEN + delay_offset) * 2 * sizeof(float), 
+        sizeof(float) * (OFDM_CA_NUM - delay_offset) * 2); // COPY
+    if(delay_offset > 0) // append zero
+    {
+        memset((char *)fft_buffer_.FFT_inputs[FFT_buffer_target_id] 
+            + (OFDM_CA_NUM - delay_offset) * 2 * sizeof(float), 0, sizeof(float) * 2 * delay_offset);
+    }
+    // perform fft
+    mufft_execute_plan_1d(muplans_[tid], fft_buffer_.FFT_outputs[FFT_buffer_target_id], 
+        fft_buffer_.FFT_inputs[FFT_buffer_target_id]);
+
+    // debug
+/*
+    if(tid ==0)
+    {
+        complex_float *cur_fft_buffer_ptr = fft_buffer_.FFT_inputs[FFT_buffer_target_id];
+        for(int i = 0; i < 10; i++)
+            printf("%f + %f i\n", cur_fft_buffer_ptr[i].real, cur_fft_buffer_ptr[i].imag);
+        printf("after fft\n");
+        cur_fft_buffer_ptr = fft_buffer_.FFT_outputs[FFT_buffer_target_id];
+        for(int i = 0; i < 10; i++)
+            printf("%f + %f i\n", cur_fft_buffer_ptr[i].real, cur_fft_buffer_ptr[i].imag);
+        exit(0);
+    }
+*/
 
     // after finish
     socket_buffer_.buffer_status[offset] = 0; // now empty
