@@ -49,15 +49,12 @@ public:
     static const int SOCKET_BUFFER_FRAME_NUM = 10; // buffer 10 frames
     static const int TASK_BUFFER_FRAME_NUM = 5;
 
-    static const int CE_PARTATION = 8; // use CE_PARTATION threads to perform CE of a subframe
-
     CoMP();
     ~CoMP();
 
     void start();
     static void* taskThread(void* context);
     void doCrop(int tid, int offset);
-    void doCE(int tid, int offset);
 
     struct EventHandlerContext
     {
@@ -102,6 +99,7 @@ private:
 
     // all checkers
     int cropper_checker_[subframe_num_perframe * TASK_BUFFER_FRAME_NUM];
+    int csi_checker_[TASK_BUFFER_FRAME_NUM];
 
     std::queue<std::tuple<int, int>> taskWaitList;
 

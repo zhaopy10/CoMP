@@ -67,7 +67,8 @@ CoMP::CoMP()
         epoll_ctl( epoll_fd_task_side[i], EPOLL_CTL_ADD, pipe_task_[i][0], &event_task_side[i]); 
     }
     
-    memset(cropper_checker_, 0, sizeof(int) * subframe_num_perframe);
+    memset(cropper_checker_, 0, sizeof(int) * subframe_num_perframe * TASK_BUFFER_FRAME_NUM);
+    memset(csi_checker_, 0, sizeof(int) * TASK_BUFFER_FRAME_NUM);
     memset(task_status_, 0, sizeof(bool) * TASK_THREAD_NUM); 
 
     // create
@@ -178,29 +179,22 @@ void CoMP::start()
                     cropper_checker_[cropper_checker_id] ++;
                     if(cropper_checker_[cropper_checker_id] == BS_ANT_NUM) // this sub-frame is finished
                     {
-                        cropper_checker_[subframe_id] = 0; // this subframe is finished
-                        if (isPilot(subframe_id)) // this subframe is pilot, do CE
-                        {
-                            // add CE task
-                            for(int k = 0; k < CE_PARTATION; k++)
-                            {
-                                taskWaitList.push(std::make_tuple(TASK_CE, cropper_checker_id * CE_PARTATION + k));
-                            }
-
-                        }
-                        else if (isData(subframe_id))
-                        {
-                            // do nothing 
-                        }
-                        else
-                        {
-                            printf("subframe_id wrong\n");
-                            exit(0);
-                        }
+                        cropper_checker_[cropper_checker_id] = 0; // this subframe is finished
                     }
 
+                    if(isPilot(subframe_id))
+                    {
+                        int csi_checker_id = frame_id;
+                        csi_checker_[csi_checker_id] ++;
+                        if(csi_checker_[csi_checker_id] == (BS_ANT_NUM * UE_NUM))
+                        {
+                            csi_checker_[csi_checker_id] = 0;
+                            printf("Frame %d, csi ready\n", frame_id);
+                        }
+                    }
+                    
                 }
-                else if (event_id = EVENT_CE)
+                else
                 {
                     /* code */
                 }
@@ -262,10 +256,6 @@ void* CoMP::taskThread(void* context)
         {   
             obj_ptr->doCrop(tid, offset);
         }
-        else if (task_id = TASK_CE)
-        {
-            obj_ptr->doCE(tid, offset);
-        }
         else
         {
 
@@ -296,43 +286,6 @@ inline complex_float CoMP::divide(complex_float e1, complex_float e2)
     return re;
 }
 
-void CoMP::doCE(int tid, int offset)
-{
-    // get the required indexes
-    int input_offset = offset;
-    int frame_id, subframe_id, ant_block_id, ant_block_size;
-    ant_block_size = BS_ANT_NUM / CE_PARTATION;
-    ant_block_id = input_offset % CE_PARTATION;
-    input_offset = (input_offset - ant_block_id) / CE_PARTATION;
-    subframe_id = input_offset % subframe_num_perframe;
-    frame_id = (input_offset - subframe_id) / subframe_num_perframe;
-    
-    //debug
-    if(frame_id == 0 && subframe_id == 0 && ant_block_id == 0)
-        printf("process CE \n");
-
-    // perform CE for this ant block
-    // Note: map subframe_id to UE_id (assuming subframe_id = UE_id for pilots)
-    int UE_id = subframe_id;
-    int ca_offset = frame_id * OFDM_CA_NUM;
-    for(int i = 0; i < ant_block_size; i++)
-    {
-        int csi_offset = ant_block_id * ant_block_size * UE_NUM + UE_id;
-        int fft_pos = getFFTBufferIndex(frame_id, subframe_id, ant_block_id * ant_block_size + i);
-        for(int j = 0; j < OFDM_CA_NUM; j++)
-        {
-            csi_buffer_.CSI[ca_offset + j][csi_offset] = divide(fft_buffer_.FFT_outputs[fft_pos][j], pilots_[j]);
-        }
-    }
-
-    char tmp_data[sizeof(int) * 2];
-    int event_id = EVENT_CE;
-    memcpy(tmp_data, &event_id, sizeof(int));
-    memcpy(tmp_data + sizeof(int), &(offset), sizeof(int));
-
-    write(pipe_task_finish_[tid][1], tmp_data, sizeof(int) * 2); // tell main thread CE finished
-}
-
 void CoMP::doCrop(int tid, int offset)
 {
     // read info
@@ -357,6 +310,18 @@ void CoMP::doCrop(int tid, int offset)
     // perform fft
     mufft_execute_plan_1d(muplans_[tid], fft_buffer_.FFT_outputs[FFT_buffer_target_id], 
         fft_buffer_.FFT_inputs[FFT_buffer_target_id]);
+
+    // if it is pilot part, do CE
+    if(isPilot(subframe_id))
+    {
+        int UE_id = subframe_id;
+        int ca_offset = (frame_id % TASK_BUFFER_FRAME_NUM) * OFDM_CA_NUM;
+        int csi_offset = ant_id * UE_NUM + UE_id;
+        for(int j = 0; j < OFDM_CA_NUM; j++)
+        {
+            csi_buffer_.CSI[ca_offset + j][csi_offset] = divide(fft_buffer_.FFT_outputs[FFT_buffer_target_id][j], pilots_[j]);
+        }
+    }
 
     // debug
 /*
