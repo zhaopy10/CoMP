@@ -112,6 +112,14 @@ CoMP::~CoMP()
 
 void CoMP::start()
 {
+#ifdef ENABLE_CPU_ATTACH
+    if(stick_this_thread_to_core(0) != 0)
+    {
+        perror("stitch main thread to core 0 failed");
+        exit(0);
+    }
+#endif
+
     pthread_t recv_thread = receiver_->startRecv(socket_buffer_.buffer.data(), 
         socket_buffer_.buffer_status.data(), socket_buffer_.buffer_status.size(), socket_buffer_.buffer.size());
     // event loop
@@ -244,6 +252,14 @@ void* CoMP::taskThread(void* context)
     CoMP* obj_ptr = ((EventHandlerContext *)context)->obj_ptr;
     int tid = ((EventHandlerContext *)context)->id;
     printf("task thread %d starts\n", tid);
+
+#ifdef ENABLE_CPU_ATTACH
+    if(stick_this_thread_to_core(tid + 1) != 0)
+    {
+        printf("stitch thread %d to core %d failed\n", tid, tid + 1);
+        exit(0);
+    }
+#endif
 
     int task_epoll_fd = obj_ptr->epoll_fd_task_side[tid];
     // wait for event

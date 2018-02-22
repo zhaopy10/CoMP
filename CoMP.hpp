@@ -1,3 +1,6 @@
+#ifndef COMP_HEAD
+#define COMP_HEAD
+
 #include "packageReceiver.hpp"
 #include <unistd.h>
 #include <memory>
@@ -11,6 +14,7 @@
 #include <complex.h>
 #include <math.h>
 #include <tuple>
+#include "cpu_attach.hpp"
 
 struct complex_float {
     float real;
@@ -83,6 +87,8 @@ public:
 
     inline complex_float divide(complex_float e1, complex_float e2);
 
+
+
 private:
     std::unique_ptr<PackageReceiver> receiver_;
     SocketBuffer socket_buffer_;
@@ -123,4 +129,4 @@ private:
     int debug_count = 0;
 };
 
-
+#endif
