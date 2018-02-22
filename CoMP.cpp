@@ -26,6 +26,16 @@ CoMP::CoMP()
     for(int i = 0; i < csi_buffer_.CSI.size(); i++)
         csi_buffer_.CSI[i].resize(BS_ANT_NUM * UE_NUM);
 
+    // initialize data buffer
+    data_buffer_.data.resize(OFDM_CA_NUM * data_subframe_num_perframe * TASK_BUFFER_FRAME_NUM);
+    for(int i = 0; i < data_buffer_.data.size(); i++)
+        data_buffer_.data[i].resize(BS_ANT_NUM);
+
+    // initialize precoder buffer
+    precoder_buffer_.precoder.resize(OFDM_CA_NUM * TASK_BUFFER_FRAME_NUM);
+    for(int i = 0; i < precoder_buffer_.precoder.size(); i++)
+        precoder_buffer_.precoder[i].resize(UE_NUM * BS_ANT_NUM);
+
     // read pilots from file
     pilots_.resize(OFDM_CA_NUM);
 
@@ -162,6 +172,7 @@ void CoMP::start()
                 {
                     tid++;
                 }
+                assert(tid < TASK_THREAD_NUM);
                 //printf("tid %d finished\n", tid);
                 task_status_[tid] = false; // now free
                 // the data length should be the same for all kinds of events ????
@@ -189,7 +200,7 @@ void CoMP::start()
                         if(csi_checker_[csi_checker_id] == (BS_ANT_NUM * UE_NUM))
                         {
                             csi_checker_[csi_checker_id] = 0;
-                            printf("Frame %d, csi ready\n", frame_id);
+                            //printf("Frame %d, csi ready\n", frame_id);
                         }
                     }
                     
@@ -321,6 +332,18 @@ void CoMP::doCrop(int tid, int offset)
         {
             csi_buffer_.CSI[ca_offset + j][csi_offset] = divide(fft_buffer_.FFT_outputs[FFT_buffer_target_id][j], pilots_[j]);
         }
+    }
+    else if(isData(subframe_id)) // if it is data part, just transpose
+    {
+        
+        int data_subframe_id = subframe_id - UE_NUM;
+        int ca_offset = (frame_id % TASK_BUFFER_FRAME_NUM) * data_subframe_num_perframe * OFDM_CA_NUM
+            + data_subframe_id * OFDM_CA_NUM;
+        for(int j = 0; j < OFDM_CA_NUM; j++)
+        {
+            data_buffer_.data[ca_offset + j][ant_id] = fft_buffer_.FFT_outputs[FFT_buffer_target_id][j];
+        }
+        
     }
 
     // debug

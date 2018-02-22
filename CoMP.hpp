@@ -37,6 +37,19 @@ struct CSIBuffer
     std::vector<std::vector<complex_float>> CSI;
 };
 
+struct DataBuffer
+{
+    // record TASK_BUFFER_FRAME_NUM entire frames
+    std::vector<std::vector<complex_float>> data;
+};
+
+struct PrecoderBuffer
+{
+    // record TASK_BUFFER_FRAME_NUM entire frames
+    // inner vector record CSI of UE_NUM * BS_ANT_NUM matrix
+    std::vector<std::vector<complex_float>> precoder;
+};
+
 //typename struct EventHandlerContext;
 
 class CoMP
@@ -75,6 +88,8 @@ private:
     SocketBuffer socket_buffer_;
     FFTBuffer fft_buffer_;
     CSIBuffer csi_buffer_;
+    DataBuffer data_buffer_;
+    PrecoderBuffer precoder_buffer_;
 
     std::vector<complex_float> pilots_;
 
