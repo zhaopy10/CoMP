@@ -119,9 +119,9 @@ void CoMP::start()
         exit(0);
     }
 #endif
-
+    // attach to core 1, but if ENABLE_CPU_ATTACH is not defined, it does not work
     pthread_t recv_thread = receiver_->startRecv(socket_buffer_.buffer.data(), 
-        socket_buffer_.buffer_status.data(), socket_buffer_.buffer_status.size(), socket_buffer_.buffer.size());
+        socket_buffer_.buffer_status.data(), socket_buffer_.buffer_status.size(), socket_buffer_.buffer.size(), 1);
     // event loop
     struct epoll_event ev[MAX_EVENT_NUM];
     int nfds;
@@ -254,7 +254,7 @@ void* CoMP::taskThread(void* context)
     printf("task thread %d starts\n", tid);
 
 #ifdef ENABLE_CPU_ATTACH
-    if(stick_this_thread_to_core(tid + 1) != 0)
+    if(stick_this_thread_to_core(tid + 2) != 0)
     {
         printf("stitch thread %d to core %d failed\n", tid, tid + 1);
         exit(0);

@@ -35,7 +35,7 @@ public:
     PackageReceiver(int* in_pipe);
     ~PackageReceiver();
 
-    pthread_t startRecv(char* in_buffer, int* in_buffer_status, int in_buffer_frame_num, int in_buffer_length);
+    pthread_t startRecv(char* in_buffer, int* in_buffer_status, int in_buffer_frame_num, int in_buffer_length, int core_id = 1);
     static void* loopRecv(void *context);
  
 private:
@@ -48,6 +48,7 @@ private:
     int buffer_frame_num_;
 
     int* pipe_;  // write at port 1
+    int core_id_;
 };
 
 

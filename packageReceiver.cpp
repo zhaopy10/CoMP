@@ -1,5 +1,5 @@
 #include "packageReceiver.hpp"
-
+#include "cpu_attach.hpp"
 
 PackageReceiver::PackageReceiver()
 {
@@ -35,7 +35,7 @@ PackageReceiver::~PackageReceiver()
 {
 }
 
-pthread_t PackageReceiver::startRecv(char* in_buffer, int* in_buffer_status, int in_buffer_frame_num, int in_buffer_length)
+pthread_t PackageReceiver::startRecv(char* in_buffer, int* in_buffer_status, int in_buffer_frame_num, int in_buffer_length, int in_core_id)
 {
     // check length
     buffer_frame_num_ = in_buffer_frame_num;
@@ -43,6 +43,7 @@ pthread_t PackageReceiver::startRecv(char* in_buffer, int* in_buffer_status, int
     buffer_length_ = in_buffer_length;
     buffer_ = in_buffer;  // for save data
     buffer_status_ = in_buffer_status; // for save status
+    core_id_ = in_core_id;
 
     //printf("start Recv thread\n");
     // new thread
@@ -64,6 +65,16 @@ void* PackageReceiver::loopRecv(void *context)
     int buffer_length = obj_ptr->buffer_length_;
     int buffer_frame_num = obj_ptr->buffer_frame_num_;
     int* pipe = obj_ptr->pipe_;
+    int core_id = obj_ptr->core_id_;
+
+#ifdef ENABLE_CPU_ATTACH
+    if(stick_this_thread_to_core(core_id) != 0)
+    {
+        printf("stitch package receive thread to core %d failed\n", core_id);
+        exit(0);
+    }
+#endif
+
 
     char* cur_ptr_buffer = buffer;
     int* cur_ptr_buffer_status = buffer_status;
