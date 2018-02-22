@@ -159,13 +159,13 @@ void CoMP::start()
                 }
                 else // all thread are running
                 {
-
                     taskWaitList.push(std::make_tuple(TASK_CROP, offset));
                 }
                 
             }
             else // task event
             {
+                debug_count = (debug_count + 1) % (int)1e5;
                 //printf("get task event\n");
                 int tid = 0;
                 while(ev[i].data.fd != pipe_task_finish_[tid][0]) // find tid
@@ -175,6 +175,26 @@ void CoMP::start()
                 assert(tid < TASK_THREAD_NUM);
                 //printf("tid %d finished\n", tid);
                 task_status_[tid] = false; // now free
+
+                // find a task in the waiting list
+                if(taskWaitList.size() > 0) // not empty
+                {
+                    if(taskWaitList.size() > max_queue_delay)
+                    {
+                        max_queue_delay = taskWaitList.size();
+                    }
+                    if(debug_count == (1e5 - 1))
+                        printf("max_queue_delay %d, current_queue_delay %d\n", max_queue_delay, taskWaitList.size());
+
+                    task_status_[tid] = true; // now busy
+                    std::tuple<int, int> task_data = taskWaitList.front();
+                    taskWaitList.pop();
+                    char tmp_data_for_task[sizeof(int) * 2];
+                    memcpy(tmp_data_for_task, &(std::get<0>(task_data)), sizeof(int));
+                    memcpy(tmp_data_for_task + sizeof(int), &(std::get<1>(task_data)), sizeof(int));
+                    write(pipe_task_[tid][1], tmp_data_for_task, sizeof(int) * 2); // port 1 at main_thread end                         
+                }
+
                 // the data length should be the same for all kinds of events ????
                 char tmp_data[sizeof(int) * 2];
                 read(pipe_task_finish_[tid][0], tmp_data, sizeof(int) * 2); // read 
@@ -208,23 +228,6 @@ void CoMP::start()
                 else
                 {
                     /* code */
-                }
-
-                // find a task in the waiting list
-                if(taskWaitList.size() > 0) // not empty
-                {
-                    if(taskWaitList.size() > max_queue_delay)
-                    {
-                        max_queue_delay = taskWaitList.size();
-                        printf("maximum wait list length %d\n", taskWaitList.size());
-                    }
-                    task_status_[tid] = true; // now busy
-                    std::tuple<int, int> task_data = taskWaitList.front();
-                    taskWaitList.pop();
-                    char tmp_data_for_task[sizeof(int) * 2];
-                    memcpy(tmp_data_for_task, &(std::get<0>(task_data)), sizeof(int));
-                    memcpy(tmp_data_for_task + sizeof(int), &(std::get<1>(task_data)), sizeof(int));
-                    write(pipe_task_[tid][1], tmp_data_for_task, sizeof(int) * 2); // port 1 at main_thread end                         
                 }
                 
             }
