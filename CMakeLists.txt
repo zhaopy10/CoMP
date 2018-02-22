@@ -11,4 +11,4 @@ add_executable(sender sender_cli.cpp packageSender.cpp)
 target_link_libraries(sender -lpthread)
 
 add_executable(CoMP main.cpp packageReceiver.cpp CoMP.cpp)
-target_link_libraries(CoMP -lpthread /usr/local/lib/libmufft.so)
+target_link_libraries(CoMP -lpthread /usr/local/lib/libmufft.a)
