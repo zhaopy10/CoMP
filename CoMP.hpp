@@ -10,6 +10,7 @@
 #include "mufft/fft.h"
 #include <complex.h>
 #include <math.h>
+#include <tuple>
 
 struct complex_float {
     float real;
@@ -24,8 +25,16 @@ struct SocketBuffer
 
 struct FFTBuffer
 {
+    // record TASK_BUFFER_FRAME_NUM entire frames
     complex_float ** FFT_inputs;
     complex_float ** FFT_outputs;
+};
+
+struct CSIBuffer
+{
+    // record TASK_BUFFER_FRAME_NUM entire frames
+    // inner vector record CSI of BS_ANT_NUM * UE_NUM matrix
+    std::vector<std::vector<complex_float>> CSI;
 };
 
 //typename struct EventHandlerContext;
@@ -38,7 +47,9 @@ public:
     static const int MAX_EVENT_NUM = TASK_THREAD_NUM + 1;
 
     static const int SOCKET_BUFFER_FRAME_NUM = 10; // buffer 10 frames
-    static const int TASK_BUFFER_FRAME_NUM = 2;
+    static const int TASK_BUFFER_FRAME_NUM = 5;
+
+    static const int CE_PARTATION = 8; // use CE_PARTATION threads to perform CE of a subframe
 
     CoMP();
     ~CoMP();
@@ -46,6 +57,7 @@ public:
     void start();
     static void* taskThread(void* context);
     void doCrop(int tid, int offset);
+    void doCE(int tid, int offset);
 
     struct EventHandlerContext
     {
@@ -54,11 +66,21 @@ public:
     };
 
     inline int getFFTBufferIndex(int frame_id, int subframe_id, int ant_id);
+    inline void splitFFTBufferIndex(int FFT_buffer_target_id, int *frame_id, int *subframe_id, int *ant_id);
+
+    inline bool isPilot(int subframe_id) {return (subframe_id >=0) && (subframe_id < UE_NUM); }
+    inline bool isData(int subframe_id) {return (subframe_id < subframe_num_perframe) && (subframe_id >= UE_NUM); }
+
+    inline complex_float divide(complex_float e1, complex_float e2);
 
 private:
     std::unique_ptr<PackageReceiver> receiver_;
     SocketBuffer socket_buffer_;
     FFTBuffer fft_buffer_;
+    CSIBuffer csi_buffer_;
+
+    std::vector<complex_float> pilots_;
+
     mufft_plan_1d* muplans_[TASK_THREAD_NUM];
 
     int epoll_fd;
@@ -74,13 +96,14 @@ private:
     int epoll_fd_task_side[TASK_THREAD_NUM];
     struct epoll_event event_task_side[TASK_THREAD_NUM];
 
-    int cropper_checker_[subframe_num_perframe];
-
     pthread_t task_threads[TASK_THREAD_NUM];
 
     EventHandlerContext context[TASK_THREAD_NUM];
 
-    std::queue<int> cropWaitList;
+    // all checkers
+    int cropper_checker_[subframe_num_perframe * TASK_BUFFER_FRAME_NUM];
+
+    std::queue<std::tuple<int, int>> taskWaitList;
 
     int max_queue_delay = 0;
 };

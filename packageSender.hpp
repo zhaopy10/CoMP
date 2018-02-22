@@ -26,7 +26,6 @@ public:
     static const int buffer_length = sizeof(int) * 4 + sizeof(float) * OFDM_FRAME_LEN * 2;
     static const int data_offset = sizeof(int) * 4;
     static const int subframe_num_perframe = 40;
-    static const int MAX_FRAME_ID = 1e4;
 
 public:
     PackageSender();

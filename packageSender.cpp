@@ -54,7 +54,7 @@ void PackageSender::genData()
         memcpy(buffer_[j].data() + sizeof(int) * 3, (char *)&j, sizeof(int));
         //printf("copy IQ\n");
         // waste some time
-        for(int p = 0; p < 2e3; p++)
+        for(int p = 0; p < 1e3; p++)
             rand();
 
         memcpy(buffer_[j].data() + data_offset, (char *)IQ_data, sizeof(float) * OFDM_FRAME_LEN * 2);   
@@ -74,7 +74,7 @@ void PackageSender::genData()
 void PackageSender::loopSend()
 {
     auto begin = std::chrono::system_clock::now();
-    const int info_interval = 1e1;
+    const int info_interval = 2e1;
     std::vector<int> ant_seq = std::vector<int>(buffer_.size());
     for (int i = 0; i < ant_seq.size(); ++i)
         ant_seq[i] = i;

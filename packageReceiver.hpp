@@ -28,7 +28,7 @@ public:
     // float for: I/Q samples
     static const int package_length = sizeof(int) * 4 + sizeof(float) * OFDM_FRAME_LEN * 2;
     static const int data_offset = sizeof(int) * 4;
-    static const int MAX_FRAME_ID = 1e4;
+    
 
 public:
     PackageReceiver();
