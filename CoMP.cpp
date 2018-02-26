@@ -30,9 +30,9 @@ CoMP::CoMP()
         csi_buffer_.CSI[i].resize(BS_ANT_NUM * UE_NUM);
 
     // initialize data buffer
-    data_buffer_.data.resize(OFDM_CA_NUM * data_subframe_num_perframe * TASK_BUFFER_FRAME_NUM);
+    data_buffer_.data.resize(data_subframe_num_perframe * TASK_BUFFER_FRAME_NUM);
     for(int i = 0; i < data_buffer_.data.size(); i++)
-        data_buffer_.data[i].resize(BS_ANT_NUM);
+        data_buffer_.data[i].resize(BS_ANT_NUM * OFDM_CA_NUM);
 
     // initialize precoder buffer
     precoder_buffer_.precoder.resize(OFDM_CA_NUM * TASK_BUFFER_FRAME_NUM);
@@ -86,6 +86,8 @@ CoMP::CoMP()
     memset(cropper_checker_, 0, sizeof(int) * subframe_num_perframe * TASK_BUFFER_FRAME_NUM);
     memset(csi_checker_, 0, sizeof(int) * TASK_BUFFER_FRAME_NUM);
     memset(task_status_, 0, sizeof(bool) * TASK_THREAD_NUM); 
+    memset(precoder_checker_, 0, sizeof(int) * TASK_BUFFER_FRAME_NUM); 
+    memset(precoder_status_, 0, sizeof(bool) * TASK_BUFFER_FRAME_NUM); 
 
     // create
     for(int i = 0; i < TASK_THREAD_NUM; i++)
@@ -223,21 +225,29 @@ void CoMP::start()
                     if(cropper_checker_[cropper_checker_id] == BS_ANT_NUM) // this sub-frame is finished
                     {
                         cropper_checker_[cropper_checker_id] = 0; // this subframe is finished
-                    }
-
-                    if(isPilot(subframe_id))
-                    {
-                        int csi_checker_id = frame_id;
-                        csi_checker_[csi_checker_id] ++;
-                        if(csi_checker_[csi_checker_id] == (BS_ANT_NUM * UE_NUM))
+                        if(isPilot(subframe_id))
                         {
-                            csi_checker_[csi_checker_id] = 0;
-                            //printf("Frame %d, csi ready, assign ZF\n", frame_id);
-                            for(int i = 0; i < OFDM_CA_NUM; i++)
+                            int csi_checker_id = frame_id;
+                            csi_checker_[csi_checker_id] ++;
+                            if(csi_checker_[csi_checker_id] == UE_NUM)
                             {
-                                int csi_offset_id = frame_id * OFDM_CA_NUM + i;
-                                taskWaitList.push(std::make_tuple(TASK_ZF, csi_offset_id));
+                                csi_checker_[csi_checker_id] = 0;
+                                //if(frame_id == 4)
+                                //    printf("Frame %d, csi ready, assign ZF\n", frame_id);
+                                precoder_status_[frame_id] = false; // reset to false
+                                for(int i = 0; i < OFDM_CA_NUM; i++)
+                                {
+                                    int csi_offset_id = frame_id * OFDM_CA_NUM + i;
+                                    taskWaitList.push(std::make_tuple(TASK_ZF, csi_offset_id));
+                                }
                             }
+                        }
+                        else if(isData(subframe_id))
+                        {
+                            if(!precoder_status_[frame_id])
+                                printf("subframe %d, precoder of frame %d not ready\n", subframe_id, frame_id);
+                            // never wait
+                            
                         }
                     }
                     
@@ -246,6 +256,15 @@ void CoMP::start()
                 {
                     int offset_zf = *((int *)tmp_data + 1);
                     // precoder is ready, do demodulation
+                    int ca_id = offset_zf % OFDM_CA_NUM;
+                    int frame_id = (offset_zf - ca_id) / OFDM_CA_NUM;
+                    precoder_checker_[frame_id] ++;
+                    if(precoder_checker_[frame_id] == OFDM_CA_NUM)
+                    {
+                        precoder_checker_[frame_id] = 0;
+                        precoder_status_[frame_id] = true;
+                        printf("frame %d precoder ready\n", frame_id);
+                    }
                 }
                 else
                 {
@@ -347,15 +366,31 @@ void CoMP::doZF(int tid, int offset)
     int ca_id = offset % OFDM_CA_NUM;
     int frame_id = (offset - ca_id) / OFDM_CA_NUM;
 
-/*
+
     cx_float* ptr_in = (cx_float *)csi_buffer_.CSI[offset].data();
     cx_fmat mat_input(ptr_in, BS_ANT_NUM, UE_NUM, false);
     cx_float* ptr_out = (cx_float *)precoder_buffer_.precoder[offset].data();
     cx_fmat mat_output(ptr_out, UE_NUM, BS_ANT_NUM, false);
     
-    mat_output = pinv(mat_input, 1e-2, "dc");
-*/  
+    pinv(mat_output, mat_input, 1e-1, "dc");
 
+    //debug
+/*
+    if(ca_id == 0 && frame_id == 0)
+    {
+        
+        FILE* fp_debug = fopen("tmpPrecoder.txt", "w");
+        for(int i = 0; i < UE_NUM; i++)
+        {
+            for(int j = 0; j < BS_ANT_NUM; j++)
+                fprintf(fp_debug, "%f %f ", mat_output.at(i,j).real(), mat_output.at(i,j).imag());
+            fprintf(fp_debug, "\n" );
+        }
+        fclose(fp_debug);
+        
+        exit(0);
+    }
+*/
 
     // inform main thread
     char tmp_data[sizeof(int) * 2];
@@ -396,7 +431,7 @@ void CoMP::doCrop(int tid, int offset)
     {
         int UE_id = subframe_id;
         int ca_offset = (frame_id % TASK_BUFFER_FRAME_NUM) * OFDM_CA_NUM;
-        int csi_offset = ant_id * UE_NUM + UE_id;
+        int csi_offset = ant_id + UE_id * BS_ANT_NUM;
         for(int j = 0; j < OFDM_CA_NUM; j++)
         {
             csi_buffer_.CSI[ca_offset + j][csi_offset] = divide(fft_buffer_.FFT_outputs[FFT_buffer_target_id][j], pilots_[j]);
@@ -406,11 +441,10 @@ void CoMP::doCrop(int tid, int offset)
     {
         
         int data_subframe_id = subframe_id - UE_NUM;
-        int ca_offset = (frame_id % TASK_BUFFER_FRAME_NUM) * data_subframe_num_perframe * OFDM_CA_NUM
-            + data_subframe_id * OFDM_CA_NUM;
+        int frame_offset = (frame_id % TASK_BUFFER_FRAME_NUM) * data_subframe_num_perframe + data_subframe_id;
         for(int j = 0; j < OFDM_CA_NUM; j++)
         {
-            data_buffer_.data[ca_offset + j][ant_id] = fft_buffer_.FFT_outputs[FFT_buffer_target_id][j];
+            data_buffer_.data[frame_offset][ant_id + j * BS_ANT_NUM] = fft_buffer_.FFT_outputs[FFT_buffer_target_id][j];
         }
         
     }

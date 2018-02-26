@@ -126,6 +126,10 @@ private:
     int cropper_checker_[subframe_num_perframe * TASK_BUFFER_FRAME_NUM];
     int csi_checker_[TASK_BUFFER_FRAME_NUM];
 
+    int precoder_checker_[TASK_BUFFER_FRAME_NUM];
+    bool precoder_status_[TASK_BUFFER_FRAME_NUM];
+
+
     std::queue<std::tuple<int, int>> taskWaitList;
 
     int max_queue_delay = 0;
