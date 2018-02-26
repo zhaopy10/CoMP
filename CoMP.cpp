@@ -41,6 +41,9 @@ CoMP::CoMP()
 
     // read pilots from file
     pilots_.resize(OFDM_CA_NUM);
+    FILE* fp = fopen("pilots.bin","rb");
+    fread(pilots_.data(), sizeof(float), OFDM_CA_NUM * 2, fp);
+    fclose(fp);
 
 
     // initialize pipes
@@ -344,14 +347,14 @@ void CoMP::doZF(int tid, int offset)
     int ca_id = offset % OFDM_CA_NUM;
     int frame_id = (offset - ca_id) / OFDM_CA_NUM;
 
-
+/*
     cx_float* ptr_in = (cx_float *)csi_buffer_.CSI[offset].data();
     cx_fmat mat_input(ptr_in, BS_ANT_NUM, UE_NUM, false);
     cx_float* ptr_out = (cx_float *)precoder_buffer_.precoder[offset].data();
     cx_fmat mat_output(ptr_out, UE_NUM, BS_ANT_NUM, false);
     
     mat_output = pinv(mat_input, 1e-2, "dc");
-    
+*/  
 
 
     // inform main thread
@@ -397,7 +400,7 @@ void CoMP::doCrop(int tid, int offset)
         for(int j = 0; j < OFDM_CA_NUM; j++)
         {
             csi_buffer_.CSI[ca_offset + j][csi_offset] = divide(fft_buffer_.FFT_outputs[FFT_buffer_target_id][j], pilots_[j]);
-        }
+        }       
     }
     else if(isData(subframe_id)) // if it is data part, just transpose
     {
@@ -412,20 +415,6 @@ void CoMP::doCrop(int tid, int offset)
         
     }
 
-    // debug
-/*
-    if(tid ==0)
-    {
-        complex_float *cur_fft_buffer_ptr = fft_buffer_.FFT_inputs[FFT_buffer_target_id];
-        for(int i = 0; i < 10; i++)
-            printf("%f + %f i\n", cur_fft_buffer_ptr[i].real, cur_fft_buffer_ptr[i].imag);
-        printf("after fft\n");
-        cur_fft_buffer_ptr = fft_buffer_.FFT_outputs[FFT_buffer_target_id];
-        for(int i = 0; i < 10; i++)
-            printf("%f + %f i\n", cur_fft_buffer_ptr[i].real, cur_fft_buffer_ptr[i].imag);
-        exit(0);
-    }
-*/
 
     // after finish
     socket_buffer_.buffer_status[offset] = 0; // now empty

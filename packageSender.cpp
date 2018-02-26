@@ -25,20 +25,26 @@ frame_id(0), subframe_id(0)
     /* initialize random seed: */
     srand (time(NULL));
 
-    IQ_data = new float[OFDM_FRAME_LEN * 2];
+
+    IQ_data = new float*[subframe_num_perframe * BS_ANT_NUM];
+    for(int i = 0; i < subframe_num_perframe * BS_ANT_NUM; i++)
+        IQ_data[i] = new float[OFDM_FRAME_LEN * 2];
     //for (int k = OFDM_PREFIX_LEN * 2; k < OFDM_FRAME_LEN * 2; ++k)    
     //    IQ_data[k] = rand() / (float) RAND_MAX;
     //memcpy(IQ_data, IQ_data + (OFDM_FRAME_LEN - OFDM_PREFIX_LEN) * 2, sizeof(float) * OFDM_PREFIX_LEN * 2); // prefix
 
     // read from file
     FILE* fp = fopen("data.bin","rb");
-    fread(IQ_data, sizeof(float), OFDM_FRAME_LEN * 2, fp);
+    for(int i = 0; i < subframe_num_perframe * BS_ANT_NUM; i++)
+        fread(IQ_data[i], sizeof(float), OFDM_FRAME_LEN * 2, fp);
     fclose(fp);
 
 }
 
 PackageSender::~PackageSender()
 {
+    for(int i = 0; i < subframe_num_perframe * BS_ANT_NUM; i++)
+        delete[] IQ_data[i];
     delete[] IQ_data;
 }
 
@@ -57,7 +63,8 @@ void PackageSender::genData()
         for(int p = 0; p < 2e3; p++)
             rand();
 
-        memcpy(buffer_[j].data() + data_offset, (char *)IQ_data, sizeof(float) * OFDM_FRAME_LEN * 2);   
+        int data_index = subframe_id * BS_ANT_NUM + j;
+        memcpy(buffer_[j].data() + data_offset, (char *)IQ_data[data_index], sizeof(float) * OFDM_FRAME_LEN * 2);   
     }
 
     subframe_id++;

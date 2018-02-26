@@ -41,7 +41,7 @@ private:
     int frame_id;
     int subframe_id;
 
-    float* IQ_data;
+    float** IQ_data;
 
 };
 
