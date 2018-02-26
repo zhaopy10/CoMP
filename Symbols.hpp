@@ -10,8 +10,10 @@
 
 #define EVENT_PACKAGE_RECEIVED 0
 #define EVENT_CROPPED 1
+#define EVENT_ZF 2
 
 #define TASK_CROP 0
+#define TASK_ZF 1
 
 
 static const int subframe_num_perframe = 40;

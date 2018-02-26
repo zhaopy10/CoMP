@@ -1,5 +1,8 @@
 #include "CoMP.hpp"
 
+using namespace arma;
+typedef cx_float COMPLEX;
+
 CoMP::CoMP()
 {
     printf("enter constructor\n");
@@ -173,7 +176,7 @@ void CoMP::start()
             }
             else // task event
             {
-                debug_count = (debug_count + 1) % (int)1e5;
+                
                 //printf("get task event\n");
                 int tid = 0;
                 while(ev[i].data.fd != pipe_task_finish_[tid][0]) // find tid
@@ -191,9 +194,7 @@ void CoMP::start()
                     {
                         max_queue_delay = taskWaitList.size();
                     }
-                    if(debug_count == (1e5 - 1))
-                        printf("max_queue_delay %d, current_queue_delay %d\n", max_queue_delay, taskWaitList.size());
-
+                    
                     task_status_[tid] = true; // now busy
                     std::tuple<int, int> task_data = taskWaitList.front();
                     taskWaitList.pop();
@@ -228,15 +229,32 @@ void CoMP::start()
                         if(csi_checker_[csi_checker_id] == (BS_ANT_NUM * UE_NUM))
                         {
                             csi_checker_[csi_checker_id] = 0;
-                            //printf("Frame %d, csi ready\n", frame_id);
+                            //printf("Frame %d, csi ready, assign ZF\n", frame_id);
+                            for(int i = 0; i < OFDM_CA_NUM; i++)
+                            {
+                                int csi_offset_id = frame_id * OFDM_CA_NUM + i;
+                                taskWaitList.push(std::make_tuple(TASK_ZF, csi_offset_id));
+                            }
                         }
                     }
                     
+                }
+                else if (event_id == EVENT_ZF)
+                {
+                    int offset_zf = *((int *)tmp_data + 1);
+                    // precoder is ready, do demodulation
                 }
                 else
                 {
                     /* code */
                 }
+
+                debug_count = (debug_count + 1) % (int)1e5;
+                if(debug_count == (1e5 - 1))
+                {
+                    printf("max_queue_delay %d, current_queue_delay %d\n", max_queue_delay, taskWaitList.size());
+                }
+
                 
             }
             
@@ -286,6 +304,10 @@ void* CoMP::taskThread(void* context)
         {   
             obj_ptr->doCrop(tid, offset);
         }
+        else if(task_id == TASK_ZF)
+        {
+            obj_ptr->doZF(tid, offset);
+        }
         else
         {
 
@@ -314,6 +336,31 @@ inline complex_float CoMP::divide(complex_float e1, complex_float e2)
     re.real = (e1.real * e2.real + e1.imag * e2.imag) / module;
     re.imag = (e1.imag * e2.real - e1.real * e2.imag) / module;
     return re;
+}
+
+void CoMP::doZF(int tid, int offset)
+{
+    
+    int ca_id = offset % OFDM_CA_NUM;
+    int frame_id = (offset - ca_id) / OFDM_CA_NUM;
+
+
+    cx_float* ptr_in = (cx_float *)csi_buffer_.CSI[offset].data();
+    cx_fmat mat_input(ptr_in, BS_ANT_NUM, UE_NUM, false);
+    cx_float* ptr_out = (cx_float *)precoder_buffer_.precoder[offset].data();
+    cx_fmat mat_output(ptr_out, UE_NUM, BS_ANT_NUM, false);
+    
+    mat_output = pinv(mat_input, 1e-2, "dc");
+    
+
+
+    // inform main thread
+    char tmp_data[sizeof(int) * 2];
+    int event_id = EVENT_ZF;
+    memcpy(tmp_data, &event_id, sizeof(int));
+    memcpy(tmp_data + sizeof(int), &(offset), sizeof(int));
+
+    write(pipe_task_finish_[tid][1], tmp_data, sizeof(int) * 2); // tell main thread crop finished
 }
 
 void CoMP::doCrop(int tid, int offset)
