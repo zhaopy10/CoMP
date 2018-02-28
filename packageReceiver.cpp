@@ -5,11 +5,12 @@ PackageReceiver::PackageReceiver(int N_THREAD)
 {
     socket_ = new int[N_THREAD];
     /*Configure settings in address struct*/
+    
     servaddr_.sin_family = AF_INET;
     servaddr_.sin_port = htons(7891);
     servaddr_.sin_addr.s_addr = inet_addr("127.0.0.1");
     memset(servaddr_.sin_zero, 0, sizeof(servaddr_.sin_zero));  
-
+    /*
     for(int i = 0; i < N_THREAD; i++)
     {
         if ((socket_[i] = socket(AF_INET, SOCK_DGRAM, 0)) < 0) { // UDP socket
@@ -17,12 +18,11 @@ PackageReceiver::PackageReceiver(int N_THREAD)
             exit(0);
         }
 
-        int rcvbufsize = sizeof(float) * OFDM_FRAME_LEN * 2 * BS_ANT_NUM * subframe_num_perframe;
-        setsockopt(socket_[i], SOL_SOCKET, SO_RCVBUF, &rcvbufsize, sizeof(rcvbufsize));  
+        //int rcvbufsize = sizeof(float) * OFDM_FRAME_LEN * 2 * BS_ANT_NUM * subframe_num_perframe;
+        //setsockopt(socket_[i], SOL_SOCKET, SO_RCVBUF, &rcvbufsize, sizeof(rcvbufsize));  
         int optval = 1;
-        setsockopt(socket_[i], SOL_SOCKET, SO_REUSEPORT, &optval, sizeof(optval));
+        setsockopt(socket_[i], SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &optval, sizeof(optval));
 
-        /*Bind socket with address struct*/
         if(bind(socket_[i], (struct sockaddr *) &servaddr_, sizeof(servaddr_)) != 0)
         {
             printf("socket bind failed %d\n", i);
@@ -30,6 +30,8 @@ PackageReceiver::PackageReceiver(int N_THREAD)
         }
 
     }
+    */
+
     thread_num_ = N_THREAD;
     /* initialize random seed: */
     srand (time(NULL));
@@ -79,6 +81,26 @@ void* PackageReceiver::loopRecv(void *in_context)
     PackageReceiver* obj_ptr = ((PackageReceiverContext *)in_context)->ptr;
     int tid = ((PackageReceiverContext *)in_context)->tid;
     printf("package receiver thread %d start\n", tid);
+
+        if ((obj_ptr->socket_[tid] = socket(AF_INET, SOCK_DGRAM, 0)) < 0) { // UDP socket
+            printf("cannot create socket %d\n", tid);
+            exit(0);
+        }
+
+        //int rcvbufsize = sizeof(float) * OFDM_FRAME_LEN * 2 * BS_ANT_NUM * subframe_num_perframe;
+        //setsockopt(socket_[i], SOL_SOCKET, SO_RCVBUF, &rcvbufsize, sizeof(rcvbufsize));  
+        int optval = 1;
+        if(setsockopt(obj_ptr->socket_[tid], SOL_SOCKET, SO_REUSEPORT, &optval, sizeof(optval)))
+        {
+            perror("set reuse port error");
+        }
+
+        if(bind(obj_ptr->socket_[tid], (struct sockaddr *) &obj_ptr->servaddr_, sizeof(obj_ptr->servaddr_)) != 0)
+        {
+            printf("socket bind failed %d\n", tid);
+            exit(0);
+        }
+
 
     char* buffer = obj_ptr->buffer_[tid];
     int* buffer_status = obj_ptr->buffer_status_[tid];

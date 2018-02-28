@@ -19,8 +19,8 @@ frame_id(0), subframe_id(0)
     memset(servaddr_.sin_zero, 0, sizeof(servaddr_.sin_zero));  
 
     /*Bind socket with address struct*/
-    if(bind(socket_, (struct sockaddr *) &servaddr_, sizeof(servaddr_)) != 0)
-        perror("socket bind failed");
+    //if(bind(socket_, (struct sockaddr *) &servaddr_, sizeof(servaddr_)) != 0)
+    //    perror("socket bind failed");
 
     /* initialize random seed: */
     srand (time(NULL));

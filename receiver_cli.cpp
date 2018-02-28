@@ -2,7 +2,7 @@
 
 int main(int argc, char const *argv[])
 {
-    int thread_num = 1;
+    int thread_num = 2;
     PackageReceiver receiver(thread_num);
 
     int buffer_frame_num = BS_ANT_NUM * subframe_num_perframe * 10;
