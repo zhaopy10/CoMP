@@ -10,5 +10,8 @@ set(CMAKE_CXX_FLAGS "-std=c++11 -w -O3 -mavx -mavx2 -msse2")
 add_executable(sender sender_cli.cpp packageSender.cpp)
 target_link_libraries(sender -lpthread)
 
-add_executable(CoMP main.cpp packageReceiver.cpp CoMP.cpp cpu_attach.cpp)
-target_link_libraries(CoMP -lpthread /usr/local/lib/libmufft.a -larmadillo)
+add_executable(receiver receiver_cli.cpp packageReceiver.cpp)
+target_link_libraries(receiver -lpthread)
+
+#add_executable(CoMP main.cpp packageReceiver.cpp CoMP.cpp cpu_attach.cpp)
+#target_link_libraries(CoMP -lpthread /usr/local/lib/libmufft.a -larmadillo)

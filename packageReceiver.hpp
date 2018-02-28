@@ -19,6 +19,8 @@
 #include <unistd.h>
 #include <chrono>
 
+
+
 class PackageReceiver
 {
 public:
@@ -29,26 +31,31 @@ public:
     static const int package_length = sizeof(int) * 4 + sizeof(float) * OFDM_FRAME_LEN * 2;
     static const int data_offset = sizeof(int) * 4;
     
+    struct PackageReceiverContext
+    {
+        PackageReceiver *ptr;
+        int tid;
+    };
 
 public:
-    PackageReceiver();
-    PackageReceiver(int* in_pipe);
+    PackageReceiver(int N_THREAD = 1);
     ~PackageReceiver();
 
-    pthread_t startRecv(char* in_buffer, int* in_buffer_status, int in_buffer_frame_num, int in_buffer_length, int core_id = 1);
+    std::vector<pthread_t> startRecv(char** in_buffer, int** in_buffer_status, int in_buffer_frame_num, int in_buffer_length);
     static void* loopRecv(void *context);
  
 private:
     struct sockaddr_in servaddr_;    /* server address */
-    int socket_;
+    int* socket_;
 
-    char* buffer_;
-    int* buffer_status_;
+    char** buffer_;
+    int** buffer_status_;
     int buffer_length_;
     int buffer_frame_num_;
 
-    int* pipe_;  // write at port 1
-    int core_id_;
+    int thread_num_;
+
+    PackageReceiverContext* context;
 };
 
 

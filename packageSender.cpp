@@ -38,7 +38,6 @@ frame_id(0), subframe_id(0)
     for(int i = 0; i < subframe_num_perframe * BS_ANT_NUM; i++)
         fread(IQ_data[i], sizeof(float), OFDM_FRAME_LEN * 2, fp);
     fclose(fp);
-
 }
 
 PackageSender::~PackageSender()
@@ -60,7 +59,7 @@ void PackageSender::genData()
         memcpy(buffer_[j].data() + sizeof(int) * 3, (char *)&j, sizeof(int));
         //printf("copy IQ\n");
         // waste some time
-        for(int p = 0; p < 2e3; p++)
+        for(int p = 0; p < 0; p++)
             rand();
 
         int data_index = subframe_id * BS_ANT_NUM + j;
