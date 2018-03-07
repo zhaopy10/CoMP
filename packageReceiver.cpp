@@ -10,7 +10,7 @@ PackageReceiver::PackageReceiver(int N_THREAD)
     servaddr_.sin_port = htons(7891);
     servaddr_.sin_addr.s_addr = inet_addr("127.0.0.1");
     memset(servaddr_.sin_zero, 0, sizeof(servaddr_.sin_zero));  
-    /*
+    
     for(int i = 0; i < N_THREAD; i++)
     {
         if ((socket_[i] = socket(AF_INET, SOCK_DGRAM, 0)) < 0) { // UDP socket
@@ -18,10 +18,8 @@ PackageReceiver::PackageReceiver(int N_THREAD)
             exit(0);
         }
 
-        //int rcvbufsize = sizeof(float) * OFDM_FRAME_LEN * 2 * BS_ANT_NUM * subframe_num_perframe;
-        //setsockopt(socket_[i], SOL_SOCKET, SO_RCVBUF, &rcvbufsize, sizeof(rcvbufsize));  
         int optval = 1;
-        setsockopt(socket_[i], SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &optval, sizeof(optval));
+        setsockopt(socket_[i], SOL_SOCKET, SO_REUSEPORT, &optval, sizeof(optval));
 
         if(bind(socket_[i], (struct sockaddr *) &servaddr_, sizeof(servaddr_)) != 0)
         {
@@ -30,7 +28,7 @@ PackageReceiver::PackageReceiver(int N_THREAD)
         }
 
     }
-    */
+    
 
     thread_num_ = N_THREAD;
     /* initialize random seed: */
@@ -82,25 +80,13 @@ void* PackageReceiver::loopRecv(void *in_context)
     int tid = ((PackageReceiverContext *)in_context)->tid;
     printf("package receiver thread %d start\n", tid);
 
-        if ((obj_ptr->socket_[tid] = socket(AF_INET, SOCK_DGRAM, 0)) < 0) { // UDP socket
-            printf("cannot create socket %d\n", tid);
-            exit(0);
-        }
-
-        //int rcvbufsize = sizeof(float) * OFDM_FRAME_LEN * 2 * BS_ANT_NUM * subframe_num_perframe;
-        //setsockopt(socket_[i], SOL_SOCKET, SO_RCVBUF, &rcvbufsize, sizeof(rcvbufsize));  
-        int optval = 1;
-        if(setsockopt(obj_ptr->socket_[tid], SOL_SOCKET, SO_REUSEPORT, &optval, sizeof(optval)))
-        {
-            perror("set reuse port error");
-        }
-
-        if(bind(obj_ptr->socket_[tid], (struct sockaddr *) &obj_ptr->servaddr_, sizeof(obj_ptr->servaddr_)) != 0)
-        {
-            printf("socket bind failed %d\n", tid);
-            exit(0);
-        }
-
+#ifdef ENABLE_CPU_ATTACH
+    if(stick_this_thread_to_core(tid) != 0)
+    {
+        printf("stitch thread %d to core %d failed\n", tid, tid + 1);
+        exit(0);
+    }
+#endif
 
     char* buffer = obj_ptr->buffer_[tid];
     int* buffer_status = obj_ptr->buffer_status_[tid];
