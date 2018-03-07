@@ -71,7 +71,7 @@ void PackageSender::genData()
         memcpy(buffer_[j].data() + sizeof(int) * 3, (char *)&j, sizeof(int));
         //printf("copy IQ\n");
         // waste some time
-        for(int p = 0; p < 1e3; p++)
+        for(int p = 0; p < 0; p++)
             rand();
 
         int data_index = subframe_id * BS_ANT_NUM + j;
