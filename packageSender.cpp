@@ -1,16 +1,10 @@
 #include "packageSender.hpp"
 
 
-PackageSender::PackageSender():
-frame_id(0), subframe_id(0)
+PackageSender::PackageSender(int in_thread_num):
+frame_id(0), subframe_id(0), thread_num(in_thread_num)
 {
-    if ((socket_ = socket(AF_INET, SOCK_DGRAM, 0)) < 0) { // UDP socket
-        printf("cannot create socket\n");
-        exit(0);
-    }
-    buffer_.resize(BS_ANT_NUM);
-    for(int i = 0; i < buffer_.size(); i++)
-        buffer_[i].resize(buffer_length);
+    socket_ = new int[thread_num];
 
     /*Configure settings in address struct*/
     servaddr_.sin_family = AF_INET;
@@ -18,9 +12,28 @@ frame_id(0), subframe_id(0)
     servaddr_.sin_addr.s_addr = inet_addr("127.0.0.1");
     memset(servaddr_.sin_zero, 0, sizeof(servaddr_.sin_zero));  
 
-    /*Bind socket with address struct*/
-    //if(bind(socket_, (struct sockaddr *) &servaddr_, sizeof(servaddr_)) != 0)
-    //    perror("socket bind failed");
+    for(int i = 0; i < thread_num; i++)
+    {
+        int rand_port = rand() % 65536;
+        cliaddr_.sin_family = AF_INET;
+        cliaddr_.sin_port = htons(rand_port);  // out going port is random
+        cliaddr_.sin_addr.s_addr = inet_addr("127.0.0.1");
+        memset(cliaddr_.sin_zero, 0, sizeof(cliaddr_.sin_zero));  
+
+        if ((socket_[i] = socket(AF_INET, SOCK_DGRAM, 0)) < 0) { // UDP socket
+            printf("cannot create socket\n");
+            exit(0);
+        }
+
+        /*Bind socket with address struct*/
+        if(bind(socket_[i], (struct sockaddr *) &cliaddr_, sizeof(cliaddr_)) != 0)
+            perror("socket bind failed");
+    }
+
+
+    buffer_.resize(BS_ANT_NUM);
+    for(int i = 0; i < buffer_.size(); i++)
+        buffer_[i].resize(buffer_length);
 
     /* initialize random seed: */
     srand (time(NULL));
@@ -29,10 +42,7 @@ frame_id(0), subframe_id(0)
     IQ_data = new float*[subframe_num_perframe * BS_ANT_NUM];
     for(int i = 0; i < subframe_num_perframe * BS_ANT_NUM; i++)
         IQ_data[i] = new float[OFDM_FRAME_LEN * 2];
-    //for (int k = OFDM_PREFIX_LEN * 2; k < OFDM_FRAME_LEN * 2; ++k)    
-    //    IQ_data[k] = rand() / (float) RAND_MAX;
-    //memcpy(IQ_data, IQ_data + (OFDM_FRAME_LEN - OFDM_PREFIX_LEN) * 2, sizeof(float) * OFDM_PREFIX_LEN * 2); // prefix
-
+    
     // read from file
     FILE* fp = fopen("data.bin","rb");
     for(int i = 0; i < subframe_num_perframe * BS_ANT_NUM; i++)
@@ -45,6 +55,8 @@ PackageSender::~PackageSender()
     for(int i = 0; i < subframe_num_perframe * BS_ANT_NUM; i++)
         delete[] IQ_data[i];
     delete[] IQ_data;
+
+    delete[] socket_;
 }
 
 void PackageSender::genData()
@@ -59,7 +71,7 @@ void PackageSender::genData()
         memcpy(buffer_[j].data() + sizeof(int) * 3, (char *)&j, sizeof(int));
         //printf("copy IQ\n");
         // waste some time
-        for(int p = 0; p < 0; p++)
+        for(int p = 0; p < 1e3; p++)
             rand();
 
         int data_index = subframe_id * BS_ANT_NUM + j;
@@ -86,6 +98,7 @@ void PackageSender::loopSend()
         ant_seq[i] = i;
     //std::iota(ant_seq.begin(), ant_seq.end(), 0);
 
+    int used_socker_id = 0;
     while(true)
     {
         this->genData(); // generate data
@@ -93,9 +106,9 @@ void PackageSender::loopSend()
         //std::random_shuffle ( ant_seq.begin(), ant_seq.end() ); // random perm
         for (int i = 0; i < buffer_.size(); ++i)
         {
-            //usleep(1);
+            used_socker_id = i % thread_num;
             /* send a message to the server */
-            if (sendto(this->socket_, this->buffer_[ant_seq[i]].data(), this->buffer_length, 0, (struct sockaddr *)&servaddr_, sizeof(servaddr_)) < 0) {
+            if (sendto(this->socket_[used_socker_id], this->buffer_[ant_seq[i]].data(), this->buffer_length, 0, (struct sockaddr *)&servaddr_, sizeof(servaddr_)) < 0) {
                 perror("socket sendto failed");
                 exit(0);
             }

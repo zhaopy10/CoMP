@@ -16,6 +16,7 @@
 #include <numeric>
 #include <unistd.h>
 #include <chrono>
+#include <pthread.h>
 
 class PackageSender
 {
@@ -28,7 +29,7 @@ public:
     static const int subframe_num_perframe = 40;
 
 public:
-    PackageSender();
+    PackageSender(int in_thread_num);
     ~PackageSender();
 
     void genData();
@@ -36,12 +37,15 @@ public:
     
 private:
     struct sockaddr_in servaddr_;    /* server address */
-    int socket_;
+    struct sockaddr_in cliaddr_;    /* server address */
+    int* socket_;
     std::vector<std::vector<char> > buffer_;
     int frame_id;
     int subframe_id;
 
     float** IQ_data;
+
+    int thread_num;
 
 };
 

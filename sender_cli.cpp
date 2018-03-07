@@ -2,7 +2,7 @@
 
 int main(int argc, char const *argv[])
 {
-    PackageSender sender;
+    PackageSender sender(strtol(argv[1], NULL, 10));
     printf("send package\n");
     sender.loopSend();
 
