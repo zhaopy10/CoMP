@@ -110,21 +110,86 @@ void CoMP::start()
         if(!ret)
             continue;
 
+        count++;
+        if(count == (int)1e5)
+        {
+            count = 0;
+            printf("message queue length %d\n", message_queue_.size_approx());
+        }
+
         // according to the event type
         if(event.event_type == EVENT_PACKAGE_RECEIVED)
         {
             int offset = event.data;
-            socket_buffer_.buffer_status[offset] = 0; // now empty
+            Event_data do_crop_task;
+            do_crop_task.event_type = TASK_CROP;
+            do_crop_task.data = offset;
+            if ( !task_queue_.enqueue( do_crop_task ) ) {
+                printf("crop task enqueue failed\n");
+                exit(0);
+            }
 
-            count++;
-            if(count == (int)1e5)
+            
+        }
+        else if(event.event_type == EVENT_CROPPED)
+        {
+            int FFT_buffer_target_id = event.data;
+            // check subframe
+            int frame_id, subframe_id, ant_id;
+            splitFFTBufferIndex(FFT_buffer_target_id, &frame_id, &subframe_id, &ant_id);
+                   
+            int cropper_checker_id = frame_id * subframe_num_perframe + subframe_id;
+            cropper_checker_[cropper_checker_id] ++;
+            if(cropper_checker_[cropper_checker_id] == BS_ANT_NUM) // this sub-frame is finished
             {
-                count = 0;
-                printf("queue length %d\n", message_queue_.size_approx());
+                cropper_checker_[cropper_checker_id] = 0; // this subframe is finished
+                if(isPilot(subframe_id))
+                {
+                    int csi_checker_id = frame_id;
+                    csi_checker_[csi_checker_id] ++;
+                    if(csi_checker_[csi_checker_id] == UE_NUM)
+                    {
+                        csi_checker_[csi_checker_id] = 0;
+                        //if(frame_id == 4)
+                        //    printf("Frame %d, csi ready, assign ZF\n", frame_id);
+                        precoder_status_[frame_id] = false; // reset to false
+                        Event_data do_ZF_task;
+                        do_ZF_task.event_type = TASK_ZF;
+                        for(int i = 0; i < OFDM_CA_NUM; i++)
+                        {
+                            int csi_offset_id = frame_id * OFDM_CA_NUM + i;
+                            do_ZF_task.data = csi_offset_id;
+                            if ( !task_queue_.enqueue( do_ZF_task ) ) {
+                                printf("ZF task enqueue failed\n");
+                                exit(0);
+                            }
+                        }
+                    }
+                }
+                else if(isData(subframe_id))
+                {
+                    //if(!precoder_status_[frame_id])
+                        // printf("subframe %d, precoder of frame %d not ready\n", subframe_id, frame_id);
+                    // never wait
+                            
+                }
             }
         }
-
-        //free(event);
+        else if(event.event_type = EVENT_ZF)
+        {
+            int offset_zf = event.data;
+            // precoder is ready, do demodulation
+            int ca_id = offset_zf % OFDM_CA_NUM;
+            int frame_id = (offset_zf - ca_id) / OFDM_CA_NUM;
+            precoder_checker_[frame_id] ++;
+            if(precoder_checker_[frame_id] == OFDM_CA_NUM)
+            {
+                precoder_checker_[frame_id] = 0;
+                precoder_status_[frame_id] = true;
+                if(frame_id == 0)
+                    printf("frame %d precoder ready\n", frame_id);
+            }
+        }
     }
 
     /*
@@ -290,6 +355,7 @@ void* CoMP::taskThread(void* context)
 {
     
     CoMP* obj_ptr = ((EventHandlerContext *)context)->obj_ptr;
+    moodycamel::ConcurrentQueue<Event_data>* task_queue_ = &(obj_ptr->task_queue_);
     int tid = ((EventHandlerContext *)context)->id;
     printf("task thread %d starts\n", tid);
 
@@ -301,9 +367,25 @@ void* CoMP::taskThread(void* context)
     }
 #endif
 
+    Event_data event;
+    bool ret = false;
     while(true)
     {
-        // do
+        ret = task_queue_->try_dequeue(event);
+        if(!ret)
+            continue;
+        if(event.event_type == TASK_CROP)
+        {   
+            obj_ptr->doCrop(tid, event.data);
+        }
+        else if(event.event_type == TASK_ZF)
+        {
+            obj_ptr->doZF(tid, event.data);
+        }
+        else
+        {
+
+        }
     }
 
     /*
@@ -370,7 +452,7 @@ inline complex_float CoMP::divide(complex_float e1, complex_float e2)
 
 void CoMP::doZF(int tid, int offset)
 {
-/*
+
     int ca_id = offset % OFDM_CA_NUM;
     int frame_id = (offset - ca_id) / OFDM_CA_NUM;
 
@@ -381,7 +463,7 @@ void CoMP::doZF(int tid, int offset)
     cx_fmat mat_output(ptr_out, UE_NUM, BS_ANT_NUM, false);
     
     pinv(mat_output, mat_input, 1e-1, "dc");
-*/
+
 
     //debug
 /*
@@ -401,20 +483,21 @@ void CoMP::doZF(int tid, int offset)
     }
 */
 
-/*
-    // inform main thread
-    char tmp_data[sizeof(int) * 2];
-    int event_id = EVENT_ZF;
-    memcpy(tmp_data, &event_id, sizeof(int));
-    memcpy(tmp_data + sizeof(int), &(offset), sizeof(int));
 
-    write(pipe_task_finish_[tid][1], tmp_data, sizeof(int) * 2); // tell main thread crop finished
-*/
+    // inform main thread
+    Event_data ZF_finish_event;
+    ZF_finish_event.event_type = EVENT_ZF;
+    ZF_finish_event.data = offset;
+
+    if ( !message_queue_.enqueue( ZF_finish_event ) ) {
+        printf("ZF message enqueue failed\n");
+        exit(0);
+    }
 }
 
 void CoMP::doCrop(int tid, int offset)
 {
-/*
+
     // read info
     char* cur_ptr_buffer = socket_buffer_.buffer.data() + offset * PackageReceiver::package_length;
     int ant_id, frame_id, subframe_id, cell_id;
@@ -431,7 +514,7 @@ void CoMP::doCrop(int tid, int offset)
     ushort* cur_ptr_buffer_ushort = (ushort*)(cur_ptr_buffer + sizeof(int) * 4);
     float* cur_fft_buffer_float = (float*)fft_buffer_.FFT_inputs[FFT_buffer_target_id];
     for(int i = 0; i < (OFDM_CA_NUM - delay_offset) * 2; i++)
-        cur_fft_buffer_float[i] = cur_ptr_buffer_ushort[OFDM_PREFIX_LEN + delay_offset + i];
+        cur_fft_buffer_float[i] = (cur_ptr_buffer_ushort[OFDM_PREFIX_LEN + delay_offset + i] / 65536.f - 0.5f) * 4.f;
     //memcpy((char *)fft_buffer_.FFT_inputs[FFT_buffer_target_id], 
     //    cur_ptr_buffer + sizeof(int) * 4 + (OFDM_PREFIX_LEN + delay_offset) * 2 * sizeof(float), 
     //    sizeof(float) * (OFDM_CA_NUM - delay_offset) * 2); // COPY
@@ -471,11 +554,12 @@ void CoMP::doCrop(int tid, int offset)
     // after finish
     socket_buffer_.buffer_status[offset] = 0; // now empty
     // inform main thread
-    char tmp_data[sizeof(int) * 2];
-    int event_id = EVENT_CROPPED;
-    memcpy(tmp_data, &event_id, sizeof(int));
-    memcpy(tmp_data + sizeof(int), &(FFT_buffer_target_id), sizeof(int));
+    Event_data crop_finish_event;
+    crop_finish_event.event_type = EVENT_CROPPED;
+    crop_finish_event.data = FFT_buffer_target_id;
 
-    write(pipe_task_finish_[tid][1], tmp_data, sizeof(int) * 2); // tell main thread crop finished
-*/
+    if ( !message_queue_.enqueue( crop_finish_event ) ) {
+        printf("crop message enqueue failed\n");
+        exit(0);
+    }
 }
