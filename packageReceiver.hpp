@@ -19,7 +19,7 @@
 #include <unistd.h>
 #include <chrono>
 
-
+typedef unsigned short ushort;
 class PackageReceiver
 {
 public:
@@ -27,7 +27,7 @@ public:
     static const int OFDM_FRAME_LEN = OFDM_CA_NUM + OFDM_PREFIX_LEN;
     // int for: frame_id, subframe_id, cell_id, ant_id
     // float for: I/Q samples
-    static const int package_length = sizeof(int) * 4 + sizeof(float) * OFDM_FRAME_LEN * 2;
+    static const int package_length = sizeof(int) * 4 + sizeof(ushort) * OFDM_FRAME_LEN * 2;
     static const int data_offset = sizeof(int) * 4;
     
     struct PackageReceiverContext

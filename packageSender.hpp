@@ -18,13 +18,15 @@
 #include <chrono>
 #include <pthread.h>
 
+typedef unsigned short ushort;
+
 class PackageSender
 {
 public:
     static const int OFDM_FRAME_LEN = OFDM_CA_NUM + OFDM_PREFIX_LEN;
     // int for: frame_id, subframe_id, cell_id, ant_id
-    // float for: I/Q samples
-    static const int buffer_length = sizeof(int) * 4 + sizeof(float) * OFDM_FRAME_LEN * 2;
+    // unsigned int for: I/Q samples
+    static const int buffer_length = sizeof(int) * 4 + sizeof(ushort) * OFDM_FRAME_LEN * 2;
     static const int data_offset = sizeof(int) * 4;
     static const int subframe_num_perframe = 40;
 
@@ -44,6 +46,7 @@ private:
     int subframe_id;
 
     float** IQ_data;
+    ushort** IQ_data_coded;
 
     int thread_num;
 

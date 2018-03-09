@@ -133,7 +133,7 @@ void* PackageReceiver::loopRecv(void *in_context)
         if(package_num == 1e5)
         {
             auto end = std::chrono::system_clock::now();
-            double byte_len = sizeof(float) * OFDM_FRAME_LEN * 2 * 1e5;
+            double byte_len = sizeof(ushort) * OFDM_FRAME_LEN * 2 * 1e5;
             std::chrono::duration<double> diff = end - begin;
             printf("thread %d receive %f bytes in %f secs, throughput %f MB/s\n", tid, byte_len, diff.count(), byte_len / diff.count() / 1024 / 1024);
             begin = std::chrono::system_clock::now();

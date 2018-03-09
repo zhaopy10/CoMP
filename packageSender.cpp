@@ -40,21 +40,34 @@ frame_id(0), subframe_id(0), thread_num(in_thread_num)
 
 
     IQ_data = new float*[subframe_num_perframe * BS_ANT_NUM];
+    IQ_data_coded = new ushort*[subframe_num_perframe * BS_ANT_NUM];
     for(int i = 0; i < subframe_num_perframe * BS_ANT_NUM; i++)
+    {
         IQ_data[i] = new float[OFDM_FRAME_LEN * 2];
+        IQ_data_coded[i] = new ushort[OFDM_FRAME_LEN * 2];
+    }
     
     // read from file
     FILE* fp = fopen("data.bin","rb");
     for(int i = 0; i < subframe_num_perframe * BS_ANT_NUM; i++)
+    {
         fread(IQ_data[i], sizeof(float), OFDM_FRAME_LEN * 2, fp);
+        // range [-2,2]
+        for(int j = 0; j < OFDM_FRAME_LEN * 2; j++)
+            IQ_data_coded[i][j] = (ushort)(IQ_data[i][j] * 65536 / 4 + 65536 / 2);
+    }
     fclose(fp);
 }
 
 PackageSender::~PackageSender()
 {
     for(int i = 0; i < subframe_num_perframe * BS_ANT_NUM; i++)
+    {
+        delete[] IQ_data_coded[i];
         delete[] IQ_data[i];
+    }
     delete[] IQ_data;
+    delete[] IQ_data_coded;
 
     delete[] socket_;
 }
@@ -75,7 +88,7 @@ void PackageSender::genData()
             rand();
 
         int data_index = subframe_id * BS_ANT_NUM + j;
-        memcpy(buffer_[j].data() + data_offset, (char *)IQ_data[data_index], sizeof(float) * OFDM_FRAME_LEN * 2);   
+        memcpy(buffer_[j].data() + data_offset, (char *)IQ_data_coded[data_index], sizeof(ushort) * OFDM_FRAME_LEN * 2);   
     }
 
     subframe_id++;
@@ -117,7 +130,7 @@ void PackageSender::loopSend()
         if ((frame_id+1) % info_interval == 0 && subframe_id == 0)
         {
             auto end = std::chrono::system_clock::now();
-            double byte_len = sizeof(float) * OFDM_FRAME_LEN * 2 * BS_ANT_NUM * subframe_num_perframe * info_interval;
+            double byte_len = sizeof(ushort) * OFDM_FRAME_LEN * 2 * BS_ANT_NUM * subframe_num_perframe * info_interval;
             std::chrono::duration<double> diff = end - begin;
             printf("transmit %f bytes in %f secs, throughput %f MB/s\n", byte_len, diff.count(), byte_len / diff.count() / 1024 / 1024);
             begin = std::chrono::system_clock::now();
