@@ -19,8 +19,7 @@
 
 #include "buffer.hpp"
 
-
-//typename struct EventHandlerContext;
+#include "concurrentqueue.h"
 
 class CoMP
 {
@@ -68,18 +67,10 @@ private:
 
     mufft_plan_1d* muplans_[TASK_THREAD_NUM];
 
-    int epoll_fd;
-    // A struct epoll_event for each process
-    struct epoll_event event[MAX_EVENT_NUM];
-
-    int pipe_socket_[2];
-    int pipe_task_[TASK_THREAD_NUM][2]; // used to assign task
-    int pipe_task_finish_[TASK_THREAD_NUM][2]; // used to inform main thread
+    moodycamel::ConcurrentQueue<Event_data> task_queue_ = moodycamel::ConcurrentQueue<Event_data>(SOCKET_BUFFER_FRAME_NUM * subframe_num_perframe * BS_ANT_NUM);
+    moodycamel::ConcurrentQueue<Event_data> message_queue_ = moodycamel::ConcurrentQueue<Event_data>(SOCKET_BUFFER_FRAME_NUM * subframe_num_perframe * BS_ANT_NUM);
 
     bool task_status_[TASK_THREAD_NUM]; // can only be accessed in main_thread
-
-    int epoll_fd_task_side[TASK_THREAD_NUM];
-    struct epoll_event event_task_side[TASK_THREAD_NUM];
 
     pthread_t task_threads[TASK_THREAD_NUM];
 

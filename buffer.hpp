@@ -1,7 +1,11 @@
 #ifndef BUFFER_HEAD
 #define BUFFER_HEAD
 
-
+struct Event_data
+{
+    int event_type;
+    int data;
+};
 
 struct complex_float {
     float real;

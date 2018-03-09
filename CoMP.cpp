@@ -45,43 +45,9 @@ CoMP::CoMP()
     fread(pilots_.data(), sizeof(float), OFDM_CA_NUM * 2, fp);
     fclose(fp);
 
-
-    // initialize pipes
-    pipe(pipe_socket_);
-    //fcntl(pipe_socket_[0], F_SETFL, fcntl(pipe_socket_[0], F_GETFL, 0) | O_NONBLOCK);           // non-blocking pipe
-    //fcntl(pipe_socket_[1], F_SETFL, fcntl(pipe_socket_[1], F_GETFL, 0) | O_NONBLOCK);
     printf("new PackageReceiver\n");
-    receiver_.reset(new PackageReceiver(1, pipe_socket_));
+    receiver_.reset(new PackageReceiver(1, &message_queue_));
 
-    for(int i = 0; i < TASK_THREAD_NUM; i++)
-    {
-        pipe(pipe_task_[i]);
-        pipe(pipe_task_finish_[i]);
-        //fcntl(pipe_task_[i][0], F_SETFL, fcntl(pipe_task_[i][0], F_GETFL, 0) | O_NONBLOCK);           // non-blocking pipe
-        //fcntl(pipe_task_[i][1], F_SETFL, fcntl(pipe_task_[i][1], F_GETFL, 0) | O_NONBLOCK);
-    }
-
-    
-    epoll_fd = epoll_create(MAX_EVENT_NUM);
-    // Setup the event 0 for package receiver
-    event[0].events = EPOLLIN;
-    event[0].data.fd = pipe_socket_[0];
-    epoll_ctl( epoll_fd, EPOLL_CTL_ADD, pipe_socket_[0], &event[0]); 
-    for(int i = 1; i < MAX_EVENT_NUM; i++)
-    {
-        event[i].events = EPOLLIN;
-        event[i].data.fd = pipe_task_finish_[i-1][0];
-        epoll_ctl( epoll_fd, EPOLL_CTL_ADD, pipe_task_finish_[i-1][0], &event[i]); 
-    }
-
-    // task side
-    for(int i = 0; i < TASK_THREAD_NUM; i++)
-    {
-        epoll_fd_task_side[i] = epoll_create(1);
-        event_task_side[i].events = EPOLLIN;
-        event_task_side[i].data.fd = pipe_task_[i][0]; // port 0 at task threads
-        epoll_ctl( epoll_fd_task_side[i], EPOLL_CTL_ADD, pipe_task_[i][0], &event_task_side[i]); 
-    }
     
     memset(cropper_checker_, 0, sizeof(int) * subframe_num_perframe * TASK_BUFFER_FRAME_NUM);
     memset(csi_checker_, 0, sizeof(int) * TASK_BUFFER_FRAME_NUM);
@@ -120,6 +86,7 @@ CoMP::~CoMP()
 
 void CoMP::start()
 {
+    
 #ifdef ENABLE_CPU_ATTACH
     if(stick_this_thread_to_core(0) != 0)
     {
@@ -127,11 +94,40 @@ void CoMP::start()
         exit(0);
     }
 #endif
+    int count = 0;
     // attach to core 1, but if ENABLE_CPU_ATTACH is not defined, it does not work
     char* socket_buffer_ptr = socket_buffer_.buffer.data();
     int* socket_buffer_status_ptr = socket_buffer_.buffer_status.data();
     std::vector<pthread_t> recv_thread = receiver_->startRecv(&socket_buffer_ptr, 
         &socket_buffer_status_ptr, socket_buffer_.buffer_status.size(), socket_buffer_.buffer.size(), 1);
+
+    Event_data event;
+    bool ret = false;
+    while(true)
+    {
+        // get an event
+        ret = message_queue_.try_dequeue(event);
+        if(!ret)
+            continue;
+
+        // according to the event type
+        if(event.event_type == EVENT_PACKAGE_RECEIVED)
+        {
+            int offset = event.data;
+            socket_buffer_.buffer_status[offset] = 0; // now empty
+
+            count++;
+            if(count == (int)1e5)
+            {
+                count = 0;
+                printf("queue length %d\n", message_queue_.size_approx());
+            }
+        }
+
+        //free(event);
+    }
+
+    /*
     // event loop
     struct epoll_event ev[MAX_EVENT_NUM];
     int nfds;
@@ -270,7 +266,7 @@ void CoMP::start()
                 }
                 else
                 {
-                    /* code */
+                    
                 }
 
                 debug_count = (debug_count + 1) % (int)1e5;
@@ -287,10 +283,12 @@ void CoMP::start()
         
         
     }
+    */
 }
 
 void* CoMP::taskThread(void* context)
 {
+    
     CoMP* obj_ptr = ((EventHandlerContext *)context)->obj_ptr;
     int tid = ((EventHandlerContext *)context)->id;
     printf("task thread %d starts\n", tid);
@@ -302,6 +300,13 @@ void* CoMP::taskThread(void* context)
         exit(0);
     }
 #endif
+
+    while(true)
+    {
+        // do
+    }
+
+    /*
 
     int task_epoll_fd = obj_ptr->epoll_fd_task_side[tid];
     // wait for event
@@ -337,6 +342,7 @@ void* CoMP::taskThread(void* context)
 
         }
     }
+    */
 }
 
 inline int CoMP::getFFTBufferIndex(int frame_id, int subframe_id, int ant_id)
@@ -364,7 +370,7 @@ inline complex_float CoMP::divide(complex_float e1, complex_float e2)
 
 void CoMP::doZF(int tid, int offset)
 {
-    
+/*
     int ca_id = offset % OFDM_CA_NUM;
     int frame_id = (offset - ca_id) / OFDM_CA_NUM;
 
@@ -375,6 +381,7 @@ void CoMP::doZF(int tid, int offset)
     cx_fmat mat_output(ptr_out, UE_NUM, BS_ANT_NUM, false);
     
     pinv(mat_output, mat_input, 1e-1, "dc");
+*/
 
     //debug
 /*
@@ -394,6 +401,7 @@ void CoMP::doZF(int tid, int offset)
     }
 */
 
+/*
     // inform main thread
     char tmp_data[sizeof(int) * 2];
     int event_id = EVENT_ZF;
@@ -401,10 +409,12 @@ void CoMP::doZF(int tid, int offset)
     memcpy(tmp_data + sizeof(int), &(offset), sizeof(int));
 
     write(pipe_task_finish_[tid][1], tmp_data, sizeof(int) * 2); // tell main thread crop finished
+*/
 }
 
 void CoMP::doCrop(int tid, int offset)
 {
+/*
     // read info
     char* cur_ptr_buffer = socket_buffer_.buffer.data() + offset * PackageReceiver::package_length;
     int ant_id, frame_id, subframe_id, cell_id;
@@ -467,4 +477,5 @@ void CoMP::doCrop(int tid, int offset)
     memcpy(tmp_data + sizeof(int), &(FFT_buffer_target_id), sizeof(int));
 
     write(pipe_task_finish_[tid][1], tmp_data, sizeof(int) * 2); // tell main thread crop finished
+*/
 }

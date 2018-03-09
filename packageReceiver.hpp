@@ -18,6 +18,8 @@
 #include <cassert>
 #include <unistd.h>
 #include <chrono>
+#include "buffer.hpp"
+#include "concurrentqueue.h"
 
 typedef unsigned short ushort;
 class PackageReceiver
@@ -38,7 +40,7 @@ public:
 
 public:
     PackageReceiver(int N_THREAD = 1);
-    PackageReceiver(int N_THREAD, int* in_pipe);
+    PackageReceiver(int N_THREAD, moodycamel::ConcurrentQueue<Event_data> * in_queue);
     ~PackageReceiver();
 
     std::vector<pthread_t> startRecv(char** in_buffer, int** in_buffer_status, int in_buffer_frame_num, int in_buffer_length, int in_core_id=0);
@@ -55,7 +57,7 @@ private:
 
     int thread_num_;
 
-    int* pipe_; // write at port 1
+    moodycamel::ConcurrentQueue<Event_data> *message_queue_;
     int core_id_;
 
     PackageReceiverContext* context;

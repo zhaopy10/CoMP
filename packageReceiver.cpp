@@ -37,10 +37,10 @@ PackageReceiver::PackageReceiver(int N_THREAD)
 
 }
 
-PackageReceiver::PackageReceiver(int N_THREAD, int* in_pipe):
+PackageReceiver::PackageReceiver(int N_THREAD, moodycamel::ConcurrentQueue<Event_data> * in_queue):
 PackageReceiver(N_THREAD)
 {
-    pipe_ = in_pipe;
+    message_queue_ = in_queue;
 }
 
 PackageReceiver::~PackageReceiver()
@@ -87,8 +87,7 @@ void* PackageReceiver::loopRecv(void *in_context)
     int tid = ((PackageReceiverContext *)in_context)->tid;
     printf("package receiver thread %d start\n", tid);
 
-
-    int* pipe = obj_ptr->pipe_;
+    moodycamel::ConcurrentQueue<Event_data> *message_queue_ = obj_ptr->message_queue_;
     int core_id = obj_ptr->core_id_;
 #ifdef ENABLE_CPU_ATTACH
     if(stick_this_thread_to_core(core_id + tid) != 0)
@@ -111,15 +110,16 @@ void* PackageReceiver::loopRecv(void *in_context)
     int package_num = 0;
     auto begin = std::chrono::system_clock::now();
 
+    int ret = 0;
     while(true)
     {
-        /*
+        
         if(cur_ptr_buffer_status[0] == 1)
         {
             perror("buffer full");
             exit(0);
         }
-        */
+        
         int recvlen = -1;
         int ant_id, frame_id, subframe_id, cell_id;
         if ((recvlen = recvfrom(obj_ptr->socket_[tid], (char*)cur_ptr_buffer, package_length, 0, (struct sockaddr *) &obj_ptr->servaddr_, &addrlen)) < 0)
@@ -139,8 +139,14 @@ void* PackageReceiver::loopRecv(void *in_context)
         cur_ptr_buffer_status = buffer_status + (cur_ptr_buffer_status - buffer_status + 1) % buffer_frame_num;
         cur_ptr_buffer = buffer + (cur_ptr_buffer - buffer + package_length) % buffer_length;
 
-        // write pipe
-        write(pipe[1], (char *)&offset, sizeof(int));
+        Event_data package_message;
+        package_message.event_type = EVENT_PACKAGE_RECEIVED;
+        package_message.data = offset;
+        if ( !message_queue_->enqueue( package_message ) ) {
+            printf("socket message enqueue failed\n");
+            exit(0);
+        }
+        //printf("enqueue offset %d\n", offset);
 
         package_num++;
         if(package_num == 1e5)
