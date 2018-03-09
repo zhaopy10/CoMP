@@ -1,8 +1,7 @@
 #ifndef BUFFER_HEAD
 #define BUFFER_HEAD
 
-static const int SOCKET_BUFFER_FRAME_NUM = 20; // buffer 10 frames
-static const int TASK_BUFFER_FRAME_NUM = 10;
+
 
 struct complex_float {
     float real;

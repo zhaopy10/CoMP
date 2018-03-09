@@ -51,7 +51,7 @@ CoMP::CoMP()
     //fcntl(pipe_socket_[0], F_SETFL, fcntl(pipe_socket_[0], F_GETFL, 0) | O_NONBLOCK);           // non-blocking pipe
     //fcntl(pipe_socket_[1], F_SETFL, fcntl(pipe_socket_[1], F_GETFL, 0) | O_NONBLOCK);
     printf("new PackageReceiver\n");
-    receiver_.reset(new PackageReceiver(pipe_socket_));
+    receiver_.reset(new PackageReceiver(1, pipe_socket_));
 
     for(int i = 0; i < TASK_THREAD_NUM; i++)
     {
@@ -128,8 +128,10 @@ void CoMP::start()
     }
 #endif
     // attach to core 1, but if ENABLE_CPU_ATTACH is not defined, it does not work
-    pthread_t recv_thread = receiver_->startRecv(socket_buffer_.buffer.data(), 
-        socket_buffer_.buffer_status.data(), socket_buffer_.buffer_status.size(), socket_buffer_.buffer.size(), 1);
+    char* socket_buffer_ptr = socket_buffer_.buffer.data();
+    int* socket_buffer_status_ptr = socket_buffer_.buffer_status.data();
+    std::vector<pthread_t> recv_thread = receiver_->startRecv(&socket_buffer_ptr, 
+        &socket_buffer_status_ptr, socket_buffer_.buffer_status.size(), socket_buffer_.buffer.size(), 1);
     // event loop
     struct epoll_event ev[MAX_EVENT_NUM];
     int nfds;
@@ -244,8 +246,8 @@ void CoMP::start()
                         }
                         else if(isData(subframe_id))
                         {
-                            if(!precoder_status_[frame_id])
-                                printf("subframe %d, precoder of frame %d not ready\n", subframe_id, frame_id);
+                            //if(!precoder_status_[frame_id])
+                               // printf("subframe %d, precoder of frame %d not ready\n", subframe_id, frame_id);
                             // never wait
                             
                         }
@@ -263,7 +265,7 @@ void CoMP::start()
                     {
                         precoder_checker_[frame_id] = 0;
                         precoder_status_[frame_id] = true;
-                        printf("frame %d precoder ready\n", frame_id);
+                        //printf("frame %d precoder ready\n", frame_id);
                     }
                 }
                 else
@@ -414,9 +416,15 @@ void CoMP::doCrop(int tid, int offset)
     // remove CP, do FFT
     int delay_offset = 0;
     int FFT_buffer_target_id = getFFTBufferIndex(frame_id, subframe_id, ant_id);
-    memcpy((char *)fft_buffer_.FFT_inputs[FFT_buffer_target_id], 
-        cur_ptr_buffer + sizeof(int) * 4 + (OFDM_PREFIX_LEN + delay_offset) * 2 * sizeof(float), 
-        sizeof(float) * (OFDM_CA_NUM - delay_offset) * 2); // COPY
+
+    // transfer ushort to float
+    ushort* cur_ptr_buffer_ushort = (ushort*)(cur_ptr_buffer + sizeof(int) * 4);
+    float* cur_fft_buffer_float = (float*)fft_buffer_.FFT_inputs[FFT_buffer_target_id];
+    for(int i = 0; i < (OFDM_CA_NUM - delay_offset) * 2; i++)
+        cur_fft_buffer_float[i] = cur_ptr_buffer_ushort[OFDM_PREFIX_LEN + delay_offset + i];
+    //memcpy((char *)fft_buffer_.FFT_inputs[FFT_buffer_target_id], 
+    //    cur_ptr_buffer + sizeof(int) * 4 + (OFDM_PREFIX_LEN + delay_offset) * 2 * sizeof(float), 
+    //    sizeof(float) * (OFDM_CA_NUM - delay_offset) * 2); // COPY
     if(delay_offset > 0) // append zero
     {
         memset((char *)fft_buffer_.FFT_inputs[FFT_buffer_target_id] 

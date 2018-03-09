@@ -37,13 +37,19 @@ PackageReceiver::PackageReceiver(int N_THREAD)
 
 }
 
+PackageReceiver::PackageReceiver(int N_THREAD, int* in_pipe):
+PackageReceiver(N_THREAD)
+{
+    pipe_ = in_pipe;
+}
+
 PackageReceiver::~PackageReceiver()
 {
     delete[] socket_;
     delete[] context;
 }
 
-std::vector<pthread_t> PackageReceiver::startRecv(char** in_buffer, int** in_buffer_status, int in_buffer_frame_num, int in_buffer_length)
+std::vector<pthread_t> PackageReceiver::startRecv(char** in_buffer, int** in_buffer_status, int in_buffer_frame_num, int in_buffer_length, int in_core_id)
 {
     // check length
     buffer_frame_num_ = in_buffer_frame_num;
@@ -52,6 +58,7 @@ std::vector<pthread_t> PackageReceiver::startRecv(char** in_buffer, int** in_buf
     buffer_ = in_buffer;  // for save data
     buffer_status_ = in_buffer_status; // for save status
 
+    core_id_ = in_core_id;
     //printf("start Recv thread\n");
     // new thread
     
@@ -80,10 +87,13 @@ void* PackageReceiver::loopRecv(void *in_context)
     int tid = ((PackageReceiverContext *)in_context)->tid;
     printf("package receiver thread %d start\n", tid);
 
+
+    int* pipe = obj_ptr->pipe_;
+    int core_id = obj_ptr->core_id_;
 #ifdef ENABLE_CPU_ATTACH
-    if(stick_this_thread_to_core(tid) != 0)
+    if(stick_this_thread_to_core(core_id + tid) != 0)
     {
-        printf("stitch thread %d to core %d failed\n", tid, tid + 1);
+        printf("stitch thread %d to core %d failed\n", tid, core_id + tid);
         exit(0);
     }
 #endif
@@ -128,6 +138,9 @@ void* PackageReceiver::loopRecv(void *in_context)
         cur_ptr_buffer_status[0] = 1; // has data, after doing fft, it is set to false
         cur_ptr_buffer_status = buffer_status + (cur_ptr_buffer_status - buffer_status + 1) % buffer_frame_num;
         cur_ptr_buffer = buffer + (cur_ptr_buffer - buffer + package_length) % buffer_length;
+
+        // write pipe
+        write(pipe[1], (char *)&offset, sizeof(int));
 
         package_num++;
         if(package_num == 1e5)
