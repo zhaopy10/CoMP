@@ -114,7 +114,7 @@ void CoMP::start()
         if(count == (int)1e5)
         {
             count = 0;
-            printf("message queue length %d\n", message_queue_.size_approx());
+            //printf("message queue length %d\n", message_queue_.size_approx());
         }
 
         // according to the event type
