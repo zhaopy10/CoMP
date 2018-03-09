@@ -38,6 +38,7 @@ public:
     static void* taskThread(void* context);
     void doCrop(int tid, int offset);
     void doZF(int tid, int offset);
+    void doDemul(int tid, int offset);
 
     struct EventHandlerContext
     {
@@ -79,6 +80,7 @@ private:
     // all checkers
     int cropper_checker_[subframe_num_perframe * TASK_BUFFER_FRAME_NUM];
     int csi_checker_[TASK_BUFFER_FRAME_NUM];
+    int data_checker_[TASK_BUFFER_FRAME_NUM];
 
     int precoder_checker_[TASK_BUFFER_FRAME_NUM];
     bool precoder_status_[TASK_BUFFER_FRAME_NUM];

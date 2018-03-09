@@ -140,6 +140,7 @@ void CoMP::start()
                    
             int cropper_checker_id = frame_id * subframe_num_perframe + subframe_id;
             cropper_checker_[cropper_checker_id] ++;
+
             if(cropper_checker_[cropper_checker_id] == BS_ANT_NUM) // this sub-frame is finished
             {
                 cropper_checker_[cropper_checker_id] = 0; // this subframe is finished
@@ -152,7 +153,7 @@ void CoMP::start()
                         csi_checker_[csi_checker_id] = 0;
                         //if(frame_id == 4)
                         //    printf("Frame %d, csi ready, assign ZF\n", frame_id);
-                        precoder_status_[frame_id] = false; // reset to false
+                        
                         Event_data do_ZF_task;
                         do_ZF_task.event_type = TASK_ZF;
                         for(int i = 0; i < OFDM_CA_NUM; i++)
@@ -168,8 +169,31 @@ void CoMP::start()
                 }
                 else if(isData(subframe_id))
                 {
+                    int data_checker_id = frame_id;
+                    data_checker_[data_checker_id] ++;
+                    if(data_checker_[data_checker_id] == (subframe_num_perframe - UE_NUM))
+                    {
+                        //printf("frame %d data received\n", frame_id);
+                        data_checker_[data_checker_id] = 0;
+                        // just forget check, and optimize it later
+                        Event_data do_demul_task;
+                        do_demul_task.event_type = TASK_DEMUL;
+                        for(int j = 0; j < (subframe_num_perframe - UE_NUM); j++)
+                        {
+                            for(int i = 0; i < OFDM_CA_NUM; i++)
+                            {
+                                int demul_offset_id = frame_id * OFDM_CA_NUM * (subframe_num_perframe - UE_NUM)
+                                    + j * OFDM_CA_NUM + i;
+                                do_demul_task.data = demul_offset_id;
+                                if ( !task_queue_.enqueue( do_demul_task ) ) {
+                                    printf("Demuliplexing task enqueue failed\n");
+                                    exit(0);
+                                }
+                            }
+                        }
+                    }
                     //if(!precoder_status_[frame_id])
-                        // printf("subframe %d, precoder of frame %d not ready\n", subframe_id, frame_id);
+                    //    printf("subframe %d, precoder of frame %d not ready\n", subframe_id, frame_id);
                     // never wait
                             
                 }
@@ -186,9 +210,13 @@ void CoMP::start()
             {
                 precoder_checker_[frame_id] = 0;
                 precoder_status_[frame_id] = true;
-                if(frame_id == 0)
-                    printf("frame %d precoder ready\n", frame_id);
+                //if(frame_id == 0)
+                //    printf("frame %d precoder ready\n", frame_id);
             }
+        }
+        else if(event.event_type == EVENT_DEMUL)
+        {
+            // do nothing
         }
     }
 
@@ -382,6 +410,10 @@ void* CoMP::taskThread(void* context)
         {
             obj_ptr->doZF(tid, event.data);
         }
+        else if(event.event_type == TASK_DEMUL)
+        {
+            obj_ptr->doDemul(tid, event.data);
+        }
         else
         {
 
@@ -449,6 +481,36 @@ inline complex_float CoMP::divide(complex_float e1, complex_float e2)
     re.imag = (e1.imag * e2.real - e1.real * e2.imag) / module;
     return re;
 }
+
+void CoMP::doDemul(int tid, int offset)
+{
+    //int demul_offset_id = frame_id * OFDM_CA_NUM * (subframe_num_perframe - UE_NUM)
+    //                                + j * OFDM_CA_NUM + i;
+    int ca_id = offset % OFDM_CA_NUM;
+    int offset_without_ca = (offset - ca_id) / OFDM_CA_NUM;
+    int data_subframe_id = offset_without_ca % (subframe_num_perframe - UE_NUM);
+    int frame_id = (offset_without_ca - data_subframe_id) / (subframe_num_perframe - UE_NUM);
+
+    int precoder_offset = frame_id * OFDM_CA_NUM + ca_id;
+    cx_float* precoder_ptr = (cx_float *)precoder_buffer_.precoder[precoder_offset].data();
+    cx_fmat mat_precoder(precoder_ptr, UE_NUM, BS_ANT_NUM, false);
+
+    cx_float* data_ptr = (cx_float *)(&data_buffer_.data[offset_without_ca][ca_id * BS_ANT_NUM]);
+    cx_fmat mat_data(data_ptr, BS_ANT_NUM, 1, false);
+
+    cx_fmat demuled = mat_precoder * mat_data;
+
+    // inform main thread
+    Event_data demul_finish_event;
+    demul_finish_event.event_type = EVENT_DEMUL;
+    demul_finish_event.data = offset;
+
+    if ( !message_queue_.enqueue( demul_finish_event ) ) {
+        printf("Demuliplexing message enqueue failed\n");
+        exit(0);
+    }
+}
+
 
 void CoMP::doZF(int tid, int offset)
 {
