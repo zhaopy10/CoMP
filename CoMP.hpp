@@ -63,6 +63,7 @@ private:
     CSIBuffer csi_buffer_;
     DataBuffer data_buffer_;
     PrecoderBuffer precoder_buffer_;
+    DemulBuffer demul_buffer_;
 
     std::vector<complex_float> pilots_;
 
@@ -85,6 +86,7 @@ private:
     int precoder_checker_[TASK_BUFFER_FRAME_NUM];
     bool precoder_status_[TASK_BUFFER_FRAME_NUM];
 
+    int demul_checker_[TASK_BUFFER_FRAME_NUM][(subframe_num_perframe - UE_NUM)];
 
     std::queue<std::tuple<int, int>> taskWaitList;
 

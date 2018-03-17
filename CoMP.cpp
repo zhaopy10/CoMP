@@ -39,6 +39,11 @@ CoMP::CoMP()
     for(int i = 0; i < precoder_buffer_.precoder.size(); i++)
         precoder_buffer_.precoder[i].resize(UE_NUM * BS_ANT_NUM);
 
+    // initialize demultiplexed data buffer
+    demul_buffer_.data.resize(data_subframe_num_perframe * TASK_BUFFER_FRAME_NUM);
+    for(int i = 0; i < demul_buffer_.data.size(); i++)
+        demul_buffer_.data[i].resize(OFDM_CA_NUM * UE_NUM);
+
     // read pilots from file
     pilots_.resize(OFDM_CA_NUM);
     FILE* fp = fopen("pilots.bin","rb");
@@ -54,6 +59,10 @@ CoMP::CoMP()
     memset(task_status_, 0, sizeof(bool) * TASK_THREAD_NUM); 
     memset(precoder_checker_, 0, sizeof(int) * TASK_BUFFER_FRAME_NUM); 
     memset(precoder_status_, 0, sizeof(bool) * TASK_BUFFER_FRAME_NUM); 
+    for(int i = 0; i < TASK_BUFFER_FRAME_NUM; i++)
+    {
+        memset(demul_checker_[i], 0, sizeof(int) * (subframe_num_perframe - UE_NUM));
+    }
 
     // create
     for(int i = 0; i < TASK_THREAD_NUM; i++)
@@ -199,8 +208,9 @@ void CoMP::start()
                 }
             }
         }
-        else if(event.event_type = EVENT_ZF)
+        else if(event.event_type == EVENT_ZF)
         {
+            //printf("get ZF event\n");
             int offset_zf = event.data;
             // precoder is ready, do demodulation
             int ca_id = offset_zf % OFDM_CA_NUM;
@@ -216,7 +226,34 @@ void CoMP::start()
         }
         else if(event.event_type == EVENT_DEMUL)
         {
+            //printf("get demul event\n");
             // do nothing
+            int offset_demul = event.data;
+            int ca_id = offset_demul % OFDM_CA_NUM;
+            int offset_without_ca = (offset_demul - ca_id) / OFDM_CA_NUM;
+            int data_subframe_id = offset_without_ca % (subframe_num_perframe - UE_NUM);
+            int frame_id = (offset_without_ca - data_subframe_id) / (subframe_num_perframe - UE_NUM);
+            demul_checker_[frame_id][data_subframe_id] ++;
+            if(demul_checker_[frame_id][data_subframe_id] == OFDM_CA_NUM)
+            {
+                demul_checker_[frame_id][data_subframe_id] = 0;
+                /*
+                // debug
+                if(frame_id == 4 && data_subframe_id == 4)
+                {
+                    printf("save demul data\n");
+                    FILE* fp = fopen("ver_data.txt","w");
+                    for(int cc = 0; cc < OFDM_CA_NUM; cc++)
+                    {
+                        complex_float* cx = &demul_buffer_.data[offset_without_ca][cc * UE_NUM];
+                        for(int kk = 0; kk < UE_NUM; kk++)  
+                            fprintf(fp, "%f %f\n", cx[kk].real, cx[kk].imag);
+                    }
+                    fclose(fp);
+                    exit(0);
+                }
+                */
+            }
         }
     }
 
@@ -498,7 +535,38 @@ void CoMP::doDemul(int tid, int offset)
     cx_float* data_ptr = (cx_float *)(&data_buffer_.data[offset_without_ca][ca_id * BS_ANT_NUM]);
     cx_fmat mat_data(data_ptr, BS_ANT_NUM, 1, false);
 
-    cx_fmat demuled = mat_precoder * mat_data;
+    cx_float* demul_ptr = (cx_float *)(&demul_buffer_.data[offset_without_ca][ca_id * UE_NUM]);
+    cx_fmat mat_demuled(demul_ptr, UE_NUM, 1, false);
+
+    mat_demuled = mat_precoder * mat_data;
+
+/*
+    //debug
+    if(ca_id == 0 && frame_id == 4)
+    {
+        printf("save mat precoder\n");
+        FILE* fp_debug = fopen("tmpPrecoder.txt", "w");
+        for(int i = 0; i < UE_NUM; i++)
+        {
+            for(int j = 0; j < BS_ANT_NUM; j++)
+                fprintf(fp_debug, "%f %f ", mat_precoder.at(i,j).real(), mat_precoder.at(i,j).imag());
+            fprintf(fp_debug, "\n" );
+        }
+        fclose(fp_debug);
+
+        fp_debug = fopen("tmpData.txt","w");
+        for(int i = 0; i < BS_ANT_NUM; i++)
+            fprintf(fp_debug, "%f %f\n", mat_data.at(i,0).real(), mat_data.at(i,0).imag());
+        fclose(fp_debug);
+
+        fp_debug = fopen("tmpDemul.txt","w");
+        for(int i = 0; i < UE_NUM; i++)
+            fprintf(fp_debug, "%f %f\n", mat_demuled.at(i,0).real(), mat_demuled.at(i,0).imag());
+        fclose(fp_debug);
+        
+        exit(0);
+    }
+*/
 
     // inform main thread
     Event_data demul_finish_event;
@@ -509,6 +577,7 @@ void CoMP::doDemul(int tid, int offset)
         printf("Demuliplexing message enqueue failed\n");
         exit(0);
     }
+    //printf("put demul event\n");
 }
 
 
@@ -527,23 +596,8 @@ void CoMP::doZF(int tid, int offset)
     pinv(mat_output, mat_input, 1e-1, "dc");
 
 
-    //debug
-/*
-    if(ca_id == 0 && frame_id == 0)
-    {
-        
-        FILE* fp_debug = fopen("tmpPrecoder.txt", "w");
-        for(int i = 0; i < UE_NUM; i++)
-        {
-            for(int j = 0; j < BS_ANT_NUM; j++)
-                fprintf(fp_debug, "%f %f ", mat_output.at(i,j).real(), mat_output.at(i,j).imag());
-            fprintf(fp_debug, "\n" );
-        }
-        fclose(fp_debug);
-        
-        exit(0);
-    }
-*/
+    
+
 
 
     // inform main thread
