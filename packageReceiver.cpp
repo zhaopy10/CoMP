@@ -157,8 +157,7 @@ void* PackageReceiver::loopRecv(void *in_context)
             auto end = std::chrono::system_clock::now();
             double byte_len = sizeof(ushort) * OFDM_FRAME_LEN * 2 * 1e5;
             std::chrono::duration<double> diff = end - begin;
-            printf("thread %d receive %f bytes in %f secs, throughput %f MB/s\n", tid, byte_len, diff.count(), byte_len / diff.count() / 1024 / 1024);
-            printf("maxQueueLength %d\n", maxQueueLength);
+            printf("thread %d receive %f bytes in %f secs, throughput %f MB/s, max Message Queue Length %d\n", tid, byte_len, diff.count(), byte_len / diff.count() / 1024 / 1024, maxQueueLength);
             maxQueueLength = 0;
             begin = std::chrono::system_clock::now();
             package_num = 0;

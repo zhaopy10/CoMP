@@ -103,12 +103,14 @@ void CoMP::start()
         exit(0);
     }
 #endif
-    int count = 0;
     // attach to core 1, but if ENABLE_CPU_ATTACH is not defined, it does not work
     char* socket_buffer_ptr = socket_buffer_.buffer.data();
     int* socket_buffer_status_ptr = socket_buffer_.buffer_status.data();
     std::vector<pthread_t> recv_thread = receiver_->startRecv(&socket_buffer_ptr, 
         &socket_buffer_status_ptr, socket_buffer_.buffer_status.size(), socket_buffer_.buffer.size(), 1);
+
+    int demul_count = 0;
+    auto demul_begin = std::chrono::system_clock::now();
 
     Event_data event;
     bool ret = false;
@@ -119,12 +121,7 @@ void CoMP::start()
         if(!ret)
             continue;
 
-        count++;
-        if(count == (int)1e5)
-        {
-            count = 0;
-            //printf("message queue length %d\n", message_queue_.size_approx());
-        }
+        
 
         // according to the event type
         if(event.event_type == EVENT_PACKAGE_RECEIVED)
@@ -253,6 +250,17 @@ void CoMP::start()
                     exit(0);
                 }
                 */
+                demul_count += 1;
+                if(demul_count == data_subframe_num_perframe * 20)
+                {
+                    demul_count = 0;
+                    auto demul_end = std::chrono::system_clock::now();
+                    std::chrono::duration<double> diff = demul_end - demul_begin;
+                    int samples_num_per_UE = OFDM_CA_NUM * data_subframe_num_perframe * 20;
+                    printf("Receive %d samples (per-client) from %d clients in %f secs, throughtput %f bps per-client (16QAM), current task queue length %d\n", 
+                        samples_num_per_UE, UE_NUM, diff.count(), samples_num_per_UE * log2(16.0f) / diff.count(), task_queue_.size_approx());
+                    demul_begin = std::chrono::system_clock::now();
+                }
             }
         }
     }
