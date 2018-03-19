@@ -12,10 +12,12 @@
 #define EVENT_CROPPED 1
 #define EVENT_ZF 2
 #define EVENT_DEMUL 3
+#define EVENT_TRANSPOSE 4
 
 #define TASK_CROP 0
 #define TASK_ZF 1
 #define TASK_DEMUL 2
+#define TASK_TRANSPOSE 3
 
 
 static const int subframe_num_perframe = 40;

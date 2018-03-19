@@ -1,16 +1,24 @@
 #ifndef BUFFER_HEAD
 #define BUFFER_HEAD
 
+#include <boost/align/aligned_allocator.hpp>
+
+
+struct complex_float {
+    float real;
+    float imag;
+};
+
+
+//typedef std::vector<complex_float> myVec;
+typedef std::vector<complex_float, boost::alignment::aligned_allocator<complex_float, 32>> myVec;
+
 struct Event_data
 {
     int event_type;
     int data;
 };
 
-struct complex_float {
-    float real;
-    float imag;
-};
 
 struct SocketBuffer
 {
@@ -29,26 +37,26 @@ struct CSIBuffer
 {
     // record TASK_BUFFER_FRAME_NUM entire frames
     // inner vector record CSI of BS_ANT_NUM * UE_NUM matrix
-    std::vector<std::vector<complex_float>> CSI;
+    std::vector<myVec> CSI;
 };
 
 struct DataBuffer
 {
     // record TASK_BUFFER_FRAME_NUM entire frames
-    std::vector<std::vector<complex_float>> data;
+    std::vector<myVec> data;
 };
 
 struct PrecoderBuffer
 {
     // record TASK_BUFFER_FRAME_NUM entire frames
     // inner vector record CSI of UE_NUM * BS_ANT_NUM matrix
-    std::vector<std::vector<complex_float>> precoder;
+    std::vector<myVec> precoder;
 };
 
 struct DemulBuffer
 {
     // record TASK_BUFFER_FRAME_NUM entire frames
-    std::vector<std::vector<complex_float>> data;
+    std::vector<myVec> data;
 };
 
 #endif
