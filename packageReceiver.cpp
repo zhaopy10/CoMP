@@ -142,7 +142,7 @@ void* PackageReceiver::loopRecv(void *in_context)
 
         Event_data package_message;
         package_message.event_type = EVENT_PACKAGE_RECEIVED;
-        package_message.data = offset;
+        package_message.data = offset + tid * buffer_frame_num;
         if ( !message_queue_->enqueue( package_message ) ) {
             printf("socket message enqueue failed\n");
             exit(0);

@@ -7,10 +7,13 @@ CoMP::CoMP()
 {
     printf("enter constructor\n");
     // initialize socket buffer
-    socket_buffer_.buffer.resize(PackageReceiver::package_length 
-        * subframe_num_perframe * BS_ANT_NUM * SOCKET_BUFFER_FRAME_NUM); // buffer entire frame
-    socket_buffer_.buffer_status.resize(subframe_num_perframe * BS_ANT_NUM * SOCKET_BUFFER_FRAME_NUM);
-
+    for(int i = 0; i < SOCKET_THREAD_NUM; i++)
+    {
+        socket_buffer_[i].buffer.resize(PackageReceiver::package_length 
+            * subframe_num_perframe * BS_ANT_NUM * SOCKET_BUFFER_FRAME_NUM); // buffer entire frame
+        socket_buffer_[i].buffer_status.resize(subframe_num_perframe * BS_ANT_NUM * SOCKET_BUFFER_FRAME_NUM);
+    }
+    printf("initialize buffers\n");
     // initialize FFT buffer
     int FFT_buffer_block_num = BS_ANT_NUM * subframe_num_perframe * TASK_BUFFER_FRAME_NUM;
     fft_buffer_.FFT_inputs = new complex_float*[FFT_buffer_block_num];
@@ -51,7 +54,7 @@ CoMP::CoMP()
     fclose(fp);
 
     printf("new PackageReceiver\n");
-    receiver_.reset(new PackageReceiver(1, &message_queue_));
+    receiver_.reset(new PackageReceiver(SOCKET_THREAD_NUM, &message_queue_));
 
     
     memset(cropper_checker_, 0, sizeof(int) * subframe_num_perframe * TASK_BUFFER_FRAME_NUM);
@@ -105,10 +108,15 @@ void CoMP::start()
     }
 #endif
     // attach to core 1, but if ENABLE_CPU_ATTACH is not defined, it does not work
-    char* socket_buffer_ptr = socket_buffer_.buffer.data();
-    int* socket_buffer_status_ptr = socket_buffer_.buffer_status.data();
-    std::vector<pthread_t> recv_thread = receiver_->startRecv(&socket_buffer_ptr, 
-        &socket_buffer_status_ptr, socket_buffer_.buffer_status.size(), socket_buffer_.buffer.size(), 1);
+    char* socket_buffer_ptrs[SOCKET_THREAD_NUM];
+    int* socket_buffer_status_ptrs[SOCKET_THREAD_NUM];
+    for(int i = 0; i < SOCKET_THREAD_NUM; i++)
+    {
+        socket_buffer_ptrs[i] = socket_buffer_[i].buffer.data();
+        socket_buffer_status_ptrs[i] = socket_buffer_[i].buffer_status.data();
+    }
+    std::vector<pthread_t> recv_thread = receiver_->startRecv(socket_buffer_ptrs, 
+        socket_buffer_status_ptrs, socket_buffer_[0].buffer_status.size(), socket_buffer_[0].buffer.size(), 1);
 
     int demul_count = 0;
     auto demul_begin = std::chrono::system_clock::now();
@@ -286,163 +294,7 @@ void CoMP::start()
         }
     }
 
-    /*
-    // event loop
-    struct epoll_event ev[MAX_EVENT_NUM];
-    int nfds;
-    while(true)
-    {
-        
-        nfds = epoll_wait(epoll_fd, ev, MAX_EPOLL_EVENTS_PER_RUN, -1);
-        if(nfds < 0)
-        {
-            std::error_code ec(errno, std::system_category());
-            printf("Error in epoll_wait: %s\n", ec.message().c_str());
-            exit(0);
-        }
-        
-        // loop each ready events
-        for(int i = 0; i < nfds; i++)
-        {
-            if(ev[i].data.fd == pipe_socket_[0]) // socket event
-            {
-                //printf("get socket event\n");
-                int offset;
-                read(pipe_socket_[0], (char *)&offset, sizeof(int)); // read position
-                // find an empty thread and run
-                int tid = -1;
-                for (int i = 0; i < TASK_THREAD_NUM; ++i)
-                {
-                    if(!task_status_[i])
-                    {
-                        tid = i;
-                        break;
-                    }
-                }
-                
-                if(tid >= 0) // find a thread
-                {
-                    // write TASK_CROP and offset
-                    char tmp_data[sizeof(int) * 2];
-                    int task_id = TASK_CROP;
-                    memcpy(tmp_data, &task_id, sizeof(int));
-                    memcpy(tmp_data + sizeof(int), &(offset), sizeof(int));
-                    write(pipe_task_[tid][1], tmp_data, sizeof(int) * 2); // port 1 at main_thread end
-                    task_status_[tid] = true; // set status to busy
-                }
-                else // all thread are running
-                {
-                    taskWaitList.push(std::make_tuple(TASK_CROP, offset));
-                }
-                
-            }
-            else // task event
-            {
-                
-                //printf("get task event\n");
-                int tid = 0;
-                while(ev[i].data.fd != pipe_task_finish_[tid][0]) // find tid
-                {
-                    tid++;
-                }
-                assert(tid < TASK_THREAD_NUM);
-                //printf("tid %d finished\n", tid);
-                task_status_[tid] = false; // now free
-
-                // find a task in the waiting list
-                if(taskWaitList.size() > 0) // not empty
-                {
-                    if(taskWaitList.size() > max_queue_delay)
-                    {
-                        max_queue_delay = taskWaitList.size();
-                    }
-                    
-                    task_status_[tid] = true; // now busy
-                    std::tuple<int, int> task_data = taskWaitList.front();
-                    taskWaitList.pop();
-                    char tmp_data_for_task[sizeof(int) * 2];
-                    memcpy(tmp_data_for_task, &(std::get<0>(task_data)), sizeof(int));
-                    memcpy(tmp_data_for_task + sizeof(int), &(std::get<1>(task_data)), sizeof(int));
-                    write(pipe_task_[tid][1], tmp_data_for_task, sizeof(int) * 2); // port 1 at main_thread end                         
-                }
-
-                // the data length should be the same for all kinds of events ????
-                char tmp_data[sizeof(int) * 2];
-                read(pipe_task_finish_[tid][0], tmp_data, sizeof(int) * 2); // read 
-                int event_id = *((int *)tmp_data);
-                if(event_id == EVENT_CROPPED)
-                {
-                    int FFT_buffer_target_id = *((int *)tmp_data + 1);
-                    // check subframe
-                    int frame_id, subframe_id, ant_id;
-                    splitFFTBufferIndex(FFT_buffer_target_id, &frame_id, &subframe_id, &ant_id);
-                   
-                    int cropper_checker_id = frame_id * subframe_num_perframe + subframe_id;
-                    cropper_checker_[cropper_checker_id] ++;
-                    if(cropper_checker_[cropper_checker_id] == BS_ANT_NUM) // this sub-frame is finished
-                    {
-                        cropper_checker_[cropper_checker_id] = 0; // this subframe is finished
-                        if(isPilot(subframe_id))
-                        {
-                            int csi_checker_id = frame_id;
-                            csi_checker_[csi_checker_id] ++;
-                            if(csi_checker_[csi_checker_id] == UE_NUM)
-                            {
-                                csi_checker_[csi_checker_id] = 0;
-                                //if(frame_id == 4)
-                                //    printf("Frame %d, csi ready, assign ZF\n", frame_id);
-                                precoder_status_[frame_id] = false; // reset to false
-                                for(int i = 0; i < OFDM_CA_NUM; i++)
-                                {
-                                    int csi_offset_id = frame_id * OFDM_CA_NUM + i;
-                                    taskWaitList.push(std::make_tuple(TASK_ZF, csi_offset_id));
-                                }
-                            }
-                        }
-                        else if(isData(subframe_id))
-                        {
-                            //if(!precoder_status_[frame_id])
-                               // printf("subframe %d, precoder of frame %d not ready\n", subframe_id, frame_id);
-                            // never wait
-                            
-                        }
-                    }
-                    
-                }
-                else if (event_id == EVENT_ZF)
-                {
-                    int offset_zf = *((int *)tmp_data + 1);
-                    // precoder is ready, do demodulation
-                    int ca_id = offset_zf % OFDM_CA_NUM;
-                    int frame_id = (offset_zf - ca_id) / OFDM_CA_NUM;
-                    precoder_checker_[frame_id] ++;
-                    if(precoder_checker_[frame_id] == OFDM_CA_NUM)
-                    {
-                        precoder_checker_[frame_id] = 0;
-                        precoder_status_[frame_id] = true;
-                        //printf("frame %d precoder ready\n", frame_id);
-                    }
-                }
-                else
-                {
-                    
-                }
-
-                debug_count = (debug_count + 1) % (int)1e5;
-                if(debug_count == (1e5 - 1))
-                {
-                    printf("max_queue_delay %d, current_queue_delay %d\n", max_queue_delay, taskWaitList.size());
-                }
-
-                
-            }
-            
-        }
-        
-        
-        
-    }
-    */
+    
 }
 
 void* CoMP::taskThread(void* context)
@@ -454,7 +306,7 @@ void* CoMP::taskThread(void* context)
     printf("task thread %d starts\n", tid);
 
 #ifdef ENABLE_CPU_ATTACH
-    if(stick_this_thread_to_core(tid + 2) != 0)
+    if(stick_this_thread_to_core(tid + SOCKET_THREAD_NUM + 1) != 0)
     {
         printf("stitch thread %d to core %d failed\n", tid, tid + 1);
         exit(0);
@@ -641,9 +493,11 @@ void CoMP::doZF(int tid, int offset)
 
 void CoMP::doCrop(int tid, int offset)
 {
-
+    int buffer_frame_num = subframe_num_perframe * BS_ANT_NUM * SOCKET_BUFFER_FRAME_NUM;
+    int buffer_id = offset / buffer_frame_num;
+    offset = offset - buffer_id * buffer_frame_num;
     // read info
-    char* cur_ptr_buffer = socket_buffer_.buffer.data() + offset * PackageReceiver::package_length;
+    char* cur_ptr_buffer = socket_buffer_[buffer_id].buffer.data() + offset * PackageReceiver::package_length;
     int ant_id, frame_id, subframe_id, cell_id;
     frame_id = *((int *)cur_ptr_buffer);
     subframe_id = *((int *)cur_ptr_buffer + 1);
@@ -702,7 +556,7 @@ void CoMP::doCrop(int tid, int offset)
 
 
     // after finish
-    socket_buffer_.buffer_status[offset] = 0; // now empty
+    socket_buffer_[buffer_id].buffer_status[offset] = 0; // now empty
     // inform main thread
     Event_data crop_finish_event;
     crop_finish_event.event_type = EVENT_CROPPED;

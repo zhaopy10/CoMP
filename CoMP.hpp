@@ -26,6 +26,7 @@ class CoMP
 public:
     static const int MAX_EPOLL_EVENTS_PER_RUN = 4;
     static const int TASK_THREAD_NUM = 4;
+    static const int SOCKET_THREAD_NUM = 2;
     static const int MAX_EVENT_NUM = TASK_THREAD_NUM + 1;
 
     static const int SOCKET_BUFFER_FRAME_NUM = 20; // buffer 10 frames
@@ -59,7 +60,7 @@ public:
 
 private:
     std::unique_ptr<PackageReceiver> receiver_;
-    SocketBuffer socket_buffer_;
+    SocketBuffer socket_buffer_[SOCKET_THREAD_NUM];
     FFTBuffer fft_buffer_;
     CSIBuffer csi_buffer_;
     DataBuffer data_buffer_;
