@@ -57,6 +57,7 @@ CoMP::CoMP()
     memset(cropper_checker_, 0, sizeof(int) * subframe_num_perframe * TASK_BUFFER_FRAME_NUM);
     memset(csi_checker_, 0, sizeof(int) * TASK_BUFFER_FRAME_NUM);
     memset(task_status_, 0, sizeof(bool) * TASK_THREAD_NUM); 
+    memset(data_checker_, 0, sizeof(int) * TASK_BUFFER_FRAME_NUM); 
     memset(precoder_checker_, 0, sizeof(int) * TASK_BUFFER_FRAME_NUM); 
     memset(precoder_status_, 0, sizeof(bool) * TASK_BUFFER_FRAME_NUM); 
     for(int i = 0; i < TASK_BUFFER_FRAME_NUM; i++)
