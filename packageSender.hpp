@@ -35,13 +35,14 @@ public:
     ~PackageSender();
 
     void genData();
+    void updateHead();
     void loopSend();
     
 private:
     struct sockaddr_in servaddr_;    /* server address */
     struct sockaddr_in cliaddr_;    /* server address */
     int* socket_;
-    std::vector<std::vector<char> > buffer_;
+    std::vector<std::vector<char> > buffer_[subframe_num_perframe];
     int frame_id;
     int subframe_id;
 

@@ -30,10 +30,13 @@ frame_id(0), subframe_id(0), thread_num(in_thread_num)
             perror("socket bind failed");
     }
 
-
-    buffer_.resize(BS_ANT_NUM);
-    for(int i = 0; i < buffer_.size(); i++)
-        buffer_[i].resize(buffer_length);
+    for(int i = 0; i < subframe_num_perframe; i++)
+    {
+        buffer_[i].resize(BS_ANT_NUM);
+        for(int j = 0; j < BS_ANT_NUM; j++)
+            buffer_[i][j].resize(buffer_length);
+    }
+    
 
     /* initialize random seed: */
     srand (time(NULL));
@@ -74,54 +77,57 @@ PackageSender::~PackageSender()
 
 void PackageSender::genData()
 {
+    for(int i = 0; i < subframe_num_perframe; i++)
+        for(int j = 0; j < BS_ANT_NUM; j++)
+        {
+            int data_index = i * BS_ANT_NUM + j;
+            memcpy(buffer_[i][j].data() + data_offset, (char *)IQ_data_coded[data_index], sizeof(ushort) * OFDM_FRAME_LEN * 2);   
+        }
+}
+
+void PackageSender::updateHead()
+{
     int cell_id = 0;
-    
-    for (int j = 0; j < buffer_.size(); ++j) // per antenna
+    for(int i = 0; i < BS_ANT_NUM; i++)
     {
-        memcpy(buffer_[j].data(), (char *)&frame_id, sizeof(int));
-        memcpy(buffer_[j].data() + sizeof(int), (char *)&subframe_id, sizeof(int));
-        memcpy(buffer_[j].data() + sizeof(int) * 2, (char *)&cell_id, sizeof(int));
-        memcpy(buffer_[j].data() + sizeof(int) * 3, (char *)&j, sizeof(int));
-        //printf("copy IQ\n");
-        // waste some time
-        for(int p = 0; p < 2e3; p++)
-            rand();
-
-        int data_index = subframe_id * BS_ANT_NUM + j;
-        memcpy(buffer_[j].data() + data_offset, (char *)IQ_data_coded[data_index], sizeof(ushort) * OFDM_FRAME_LEN * 2);   
+        int* ptr = (int *)buffer_[subframe_id][i].data();
+        (*ptr) = frame_id;
+        (*(ptr+1)) = subframe_id;
+        (*(ptr+2)) = cell_id;
+        (*(ptr+3)) = i;
     }
-
     subframe_id++;
     if(subframe_id == subframe_num_perframe)
     {
         subframe_id = 0;
-        frame_id ++;
+        frame_id++;
         if(frame_id == MAX_FRAME_ID)
             frame_id = 0;
     }
-    
 }
 
 void PackageSender::loopSend()
 {
     auto begin = std::chrono::system_clock::now();
     const int info_interval = 2e1;
-    std::vector<int> ant_seq = std::vector<int>(buffer_.size());
+    std::vector<int> ant_seq = std::vector<int>(BS_ANT_NUM);
     for (int i = 0; i < ant_seq.size(); ++i)
         ant_seq[i] = i;
     //std::iota(ant_seq.begin(), ant_seq.end(), 0);
 
     int used_socker_id = 0;
+    this->genData(); // generate data
+
     while(true)
     {
-        this->genData(); // generate data
+        this->updateHead();
         //printf("genData\n");
         //std::random_shuffle ( ant_seq.begin(), ant_seq.end() ); // random perm
-        for (int i = 0; i < buffer_.size(); ++i)
+        for (int i = 0; i < BS_ANT_NUM; ++i)
         {
             used_socker_id = i % thread_num;
             /* send a message to the server */
-            if (sendto(this->socket_[used_socker_id], this->buffer_[ant_seq[i]].data(), this->buffer_length, 0, (struct sockaddr *)&servaddr_, sizeof(servaddr_)) < 0) {
+            if (sendto(this->socket_[used_socker_id], this->buffer_[subframe_id][ant_seq[i]].data(), this->buffer_length, 0, (struct sockaddr *)&servaddr_, sizeof(servaddr_)) < 0) {
                 perror("socket sendto failed");
                 exit(0);
             }
