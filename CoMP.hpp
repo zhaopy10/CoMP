@@ -40,7 +40,7 @@ public:
     void doCrop(int tid, int offset);
     void doZF(int tid, int offset);
     void doDemul(int tid, int offset);
-    void doTranspose(int tid, int offset);
+
 
     struct EventHandlerContext
     {

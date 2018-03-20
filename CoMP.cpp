@@ -184,55 +184,32 @@ void CoMP::start()
                 }
                 else if(isData(subframe_id))
                 {
-                    // do transpose
-                    int subframe_offset = frame_id * data_subframe_num_perframe + (subframe_id - UE_NUM);
-                    Event_data do_trans_task;
-                    do_trans_task.event_type = TASK_TRANSPOSE;
-                    do_trans_task.data = subframe_offset;
-
-                    //printf("do transpose for frame %d, data subframe %d\n", frame_id, (subframe_id - UE_NUM));
-
-                    if ( !task_queue_.enqueue( do_trans_task ) ) {
-                        printf("Transpose task enqueue failed\n");
-                        exit(0);
-                    }          
-                }
-            }
-        }
-        else if(event.event_type == EVENT_TRANSPOSE)
-        {
-            int subframe_offset = event.data; 
-            int data_subframe_id = subframe_offset % data_subframe_num_perframe;
-            int frame_id = (subframe_offset - data_subframe_id) / data_subframe_num_perframe;
-            //printf("transpose finished for frame %d, data subframe %d\n", frame_id, data_subframe_id);
-
-            int data_checker_id = frame_id;
-            data_checker_[data_checker_id] ++;
-            if(data_checker_[data_checker_id] == data_subframe_num_perframe)
-            {
-                //printf("do demul for frame %d\n", frame_id);
-                //printf("frame %d data received\n", frame_id);
-                data_checker_[data_checker_id] = 0;
-                // just forget check, and optimize it later
-                Event_data do_demul_task;
-                do_demul_task.event_type = TASK_DEMUL;
-                for(int j = 0; j < data_subframe_num_perframe; j++)
-                {
-                    for(int i = 0; i < OFDM_CA_NUM; i++)
+                    int data_checker_id = frame_id;
+                    data_checker_[data_checker_id] ++;
+                    if(data_checker_[data_checker_id] == data_subframe_num_perframe)
                     {
-                        int demul_offset_id = frame_id * OFDM_CA_NUM * data_subframe_num_perframe
-                            + j * OFDM_CA_NUM + i;
-                        do_demul_task.data = demul_offset_id;
-                        if ( !task_queue_.enqueue( do_demul_task ) ) {
-                            printf("Demuliplexing task enqueue failed\n");
-                            exit(0);
+                        //printf("do demul for frame %d\n", frame_id);
+                        //printf("frame %d data received\n", frame_id);
+                        data_checker_[data_checker_id] = 0;
+                        // just forget check, and optimize it later
+                        Event_data do_demul_task;
+                        do_demul_task.event_type = TASK_DEMUL;
+                        for(int j = 0; j < data_subframe_num_perframe; j++)
+                        {
+                            for(int i = 0; i < OFDM_CA_NUM; i++)
+                            {
+                                int demul_offset_id = frame_id * OFDM_CA_NUM * data_subframe_num_perframe
+                                    + j * OFDM_CA_NUM + i;
+                                do_demul_task.data = demul_offset_id;
+                                if ( !task_queue_.enqueue( do_demul_task ) ) {
+                                    printf("Demuliplexing task enqueue failed\n");
+                                    exit(0);
+                                }
+                            }
                         }
-                    }
+                    }     
                 }
             }
-            //if(!precoder_status_[frame_id])
-            //    printf("subframe %d, precoder of frame %d not ready\n", subframe_id, frame_id);
-            // never wait
         }
         else if(event.event_type == EVENT_ZF)
         {
@@ -263,7 +240,7 @@ void CoMP::start()
             if(demul_checker_[frame_id][data_subframe_id] == OFDM_CA_NUM)
             {
                 demul_checker_[frame_id][data_subframe_id] = 0;
-                /*
+                
                 // debug
                 if(frame_id == 4 && data_subframe_id == 4)
                 {
@@ -278,7 +255,8 @@ void CoMP::start()
                     fclose(fp);
                     exit(0);
                 }
-                */
+                
+
                 demul_count += 1;
                 if(demul_count == data_subframe_num_perframe * 100)
                 {
@@ -332,10 +310,7 @@ void* CoMP::taskThread(void* context)
         {
             obj_ptr->doDemul(tid, event.data);
         }
-        else if(event.event_type == TASK_TRANSPOSE)
-        {
-            obj_ptr->doTranspose(tid, event.data);
-        }
+        
     }
 
     /*
@@ -424,9 +399,9 @@ void CoMP::doDemul(int tid, int offset)
 
     mat_demuled = mat_precoder * mat_data;
 
-/*
+    /*
     //debug
-    if(ca_id == 0 && frame_id == 4)
+    if(ca_id == 2 && frame_id == 4)
     {
         printf("save mat precoder\n");
         FILE* fp_debug = fopen("tmpPrecoder.txt", "w");
@@ -450,7 +425,7 @@ void CoMP::doDemul(int tid, int offset)
         
         exit(0);
     }
-*/
+    */
 
     // inform main thread
     Event_data demul_finish_event;
@@ -541,17 +516,13 @@ void CoMP::doCrop(int tid, int offset)
         
         int data_subframe_id = subframe_id - UE_NUM;
         int frame_offset = (frame_id % TASK_BUFFER_FRAME_NUM) * data_subframe_num_perframe + data_subframe_id;
-        // just copy, do trans later
-        //printf("memcpy data\n");
-        memcpy(&data_buffer_.data[frame_offset][ant_id * OFDM_CA_NUM], &fft_buffer_.FFT_outputs[FFT_buffer_target_id][0],
-            sizeof(complex_float) * OFDM_CA_NUM);
-        //printf("end memcpy data\n");
-        /*
+        
+        
         for(int j = 0; j < OFDM_CA_NUM; j++)
         {
             data_buffer_.data[frame_offset][ant_id + j * BS_ANT_NUM] = fft_buffer_.FFT_outputs[FFT_buffer_target_id][j];
         }
-        */
+        
     }
 
 
@@ -568,20 +539,3 @@ void CoMP::doCrop(int tid, int offset)
     }
 }
 
-void  CoMP::doTranspose(int tid, int offset)
-{
-    cx_float* ptr_mat = (cx_float *)data_buffer_.data[offset].data();
-    cx_fmat mat_data(ptr_mat, OFDM_CA_NUM, BS_ANT_NUM, false);
-
-    //printf("do transpose\n");
-    inplace_strans(mat_data);
-    //printf("end do transpose\n");
-    Event_data trans_finish_event;
-    trans_finish_event.event_type = EVENT_TRANSPOSE;
-    trans_finish_event.data = offset;
-
-    if ( !message_queue_.enqueue( trans_finish_event ) ) {
-        printf("crop message enqueue failed\n");
-        exit(0);
-    }
-}
