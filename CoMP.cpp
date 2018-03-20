@@ -240,7 +240,7 @@ void CoMP::start()
             if(demul_checker_[frame_id][data_subframe_id] == OFDM_CA_NUM)
             {
                 demul_checker_[frame_id][data_subframe_id] = 0;
-                
+                /*
                 // debug
                 if(frame_id == 4 && data_subframe_id == 4)
                 {
@@ -255,7 +255,7 @@ void CoMP::start()
                     fclose(fp);
                     exit(0);
                 }
-                
+                */
 
                 demul_count += 1;
                 if(demul_count == data_subframe_num_perframe * 100)
