@@ -1,6 +1,6 @@
 #include "packageReceiver.hpp"
 #include "cpu_attach.hpp"
-#define ENABLE_CPU_ATTACH
+//#define ENABLE_CPU_ATTACH
 PackageReceiver::PackageReceiver(int N_THREAD)
 {
     socket_ = new int[N_THREAD];
