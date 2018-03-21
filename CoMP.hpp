@@ -32,6 +32,8 @@ public:
     static const int SOCKET_BUFFER_FRAME_NUM = 80; // buffer 10 frames
     static const int TASK_BUFFER_FRAME_NUM = 60;
 
+    static const int demul_block_size = 32;
+
     CoMP();
     ~CoMP();
 

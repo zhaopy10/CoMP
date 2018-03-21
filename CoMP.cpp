@@ -207,7 +207,7 @@ void CoMP::start()
                         do_demul_task.event_type = TASK_DEMUL;
                         for(int j = 0; j < data_subframe_num_perframe; j++)
                         {
-                            for(int i = 0; i < OFDM_CA_NUM; i++)
+                            for(int i = 0; i < OFDM_CA_NUM / demul_block_size; i++)
                             {
                                 int demul_offset_id = frame_id * OFDM_CA_NUM * data_subframe_num_perframe
                                     + j * OFDM_CA_NUM + i;
@@ -247,7 +247,7 @@ void CoMP::start()
             int offset_without_ca = (offset_demul - ca_id) / OFDM_CA_NUM;
             int data_subframe_id = offset_without_ca % (subframe_num_perframe - UE_NUM);
             int frame_id = (offset_without_ca - data_subframe_id) / (subframe_num_perframe - UE_NUM);
-            demul_checker_[frame_id][data_subframe_id] ++;
+            demul_checker_[frame_id][data_subframe_id] += demul_block_size;
             if(demul_checker_[frame_id][data_subframe_id] == OFDM_CA_NUM)
             {
                 demul_checker_[frame_id][data_subframe_id] = 0;
@@ -309,9 +309,9 @@ void* CoMP::taskThread(void* context)
     while(true)
     {
         ret = task_queue_->try_dequeue(event);
-        if(tid == 8)
+        if(tid == 0)
             total_count++;
-        if(tid == 8 && total_count == 1e6)
+        if(tid == 0 && total_count == 1e6)
         {
             printf("thread 0 task dequeue miss rate %f, queue length %d\n", (float)miss_count / total_count, task_queue_->size_approx());
             total_count = 0;
@@ -319,7 +319,7 @@ void* CoMP::taskThread(void* context)
         }
         if(!ret)
         {
-            if(tid == 8)
+            if(tid == 0)
                 miss_count++;
             continue;
         }
@@ -414,17 +414,22 @@ void CoMP::doDemul(int tid, int offset)
 
     //printf("do demul, %d %d %d\n", frame_id, data_subframe_id, ca_id);
 
-    int precoder_offset = frame_id * OFDM_CA_NUM + ca_id;
-    cx_float* precoder_ptr = (cx_float *)precoder_buffer_.precoder[precoder_offset].data();
-    cx_fmat mat_precoder(precoder_ptr, UE_NUM, BS_ANT_NUM, false);
+    for(int i = 0; i < demul_block_size; i++)
+    {
+        int precoder_offset = frame_id * OFDM_CA_NUM + ca_id + i;
+        cx_float* precoder_ptr = (cx_float *)precoder_buffer_.precoder[precoder_offset].data();
+        cx_fmat mat_precoder(precoder_ptr, UE_NUM, BS_ANT_NUM, false);
 
-    cx_float* data_ptr = (cx_float *)(&data_buffer_.data[offset_without_ca][ca_id * BS_ANT_NUM]);
-    cx_fmat mat_data(data_ptr, BS_ANT_NUM, 1, false);
+        cx_float* data_ptr = (cx_float *)(&data_buffer_.data[offset_without_ca][(ca_id + i) * BS_ANT_NUM]);
+        cx_fmat mat_data(data_ptr, BS_ANT_NUM, 1, false);
 
-    cx_float* demul_ptr = (cx_float *)(&demul_buffer_.data[offset_without_ca][ca_id * UE_NUM]);
-    cx_fmat mat_demuled(demul_ptr, UE_NUM, 1, false);
+        cx_float* demul_ptr = (cx_float *)(&demul_buffer_.data[offset_without_ca][(ca_id + i) * UE_NUM]);
+        cx_fmat mat_demuled(demul_ptr, UE_NUM, 1, false);
 
-    mat_demuled = mat_precoder * mat_data;
+        mat_demuled = mat_precoder * mat_data;
+    }
+
+    
 
     /*
     //debug
@@ -458,12 +463,12 @@ void CoMP::doDemul(int tid, int offset)
     Event_data demul_finish_event;
     demul_finish_event.event_type = EVENT_DEMUL;
     demul_finish_event.data = offset;
-    /* 
+    
     if ( !message_queue_.enqueue( demul_finish_event ) ) {
         printf("Demuliplexing message enqueue failed\n");
         exit(0);
     }
-    */
+    
     //printf("put demul event\n");
 }
 
@@ -549,7 +554,7 @@ void CoMP::doCrop(int tid, int offset)
         for(int j = 0; j < OFDM_CA_NUM; j++)
         {
             //data_buffer_.data[frame_offset][ant_id * OFDM_CA_NUM + j] = fft_buffer_.FFT_outputs[FFT_buffer_target_id][j];
-            //data_buffer_.data[frame_offset][ant_id + j * BS_ANT_NUM] = fft_buffer_.FFT_outputs[FFT_buffer_target_id][j];
+            data_buffer_.data[frame_offset][ant_id + j * BS_ANT_NUM] = fft_buffer_.FFT_outputs[FFT_buffer_target_id][j];
         }
         
     }
