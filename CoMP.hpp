@@ -25,12 +25,12 @@ class CoMP
 {
 public:
     static const int MAX_EPOLL_EVENTS_PER_RUN = 4;
-    static const int TASK_THREAD_NUM = 4;
+    static const int TASK_THREAD_NUM = 10;
     static const int SOCKET_THREAD_NUM = 2;
     static const int MAX_EVENT_NUM = TASK_THREAD_NUM + 1;
 
-    static const int SOCKET_BUFFER_FRAME_NUM = 20; // buffer 10 frames
-    static const int TASK_BUFFER_FRAME_NUM = 10;
+    static const int SOCKET_BUFFER_FRAME_NUM = 80; // buffer 10 frames
+    static const int TASK_BUFFER_FRAME_NUM = 60;
 
     CoMP();
     ~CoMP();

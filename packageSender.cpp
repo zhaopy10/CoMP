@@ -192,8 +192,8 @@ void* PackageSender::loopSend(void *in_context)
         obj_ptr->buffer_len_ --;
         pthread_mutex_unlock( &obj_ptr->lock_ );
 
-        for(int p = 0; p < 1e3; p++)
-            rand();
+for(int p = 0; p < 10; p++)
+	rand();
 
         used_socker_id = data_ptr % socket_per_thread + socket_per_thread * tid;
         /* send a message to the server */

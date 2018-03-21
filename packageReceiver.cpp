@@ -117,7 +117,7 @@ void* PackageReceiver::loopRecv(void *in_context)
         
         if(cur_ptr_buffer_status[0] == 1)
         {
-            perror("buffer full");
+            printf("thread %d buffer full\n", tid);
             exit(0);
         }
         

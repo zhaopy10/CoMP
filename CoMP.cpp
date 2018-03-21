@@ -120,15 +120,26 @@ void CoMP::start()
 
     int demul_count = 0;
     auto demul_begin = std::chrono::system_clock::now();
-
+    int miss_count = 0;
+    int total_count = 0;
     Event_data event;
     bool ret = false;
     while(true)
     {
         // get an event
         ret = message_queue_.try_dequeue(event);
+        total_count++;
+        if(total_count == 1e7)
+        {
+            printf("message dequeue miss rate %f\n", (float)miss_count / total_count);
+            total_count = 0;
+            miss_count = 0;
+        }
         if(!ret)
+        {
+            miss_count++;
             continue;
+        }
 
         
 
@@ -258,12 +269,12 @@ void CoMP::start()
                 */
 
                 demul_count += 1;
-                if(demul_count == data_subframe_num_perframe * 100)
+                if(demul_count == data_subframe_num_perframe * 20)
                 {
                     demul_count = 0;
                     auto demul_end = std::chrono::system_clock::now();
                     std::chrono::duration<double> diff = demul_end - demul_begin;
-                    int samples_num_per_UE = OFDM_CA_NUM * data_subframe_num_perframe * 100;
+                    int samples_num_per_UE = OFDM_CA_NUM * data_subframe_num_perframe * 20;
                     printf("Receive %d samples (per-client) from %d clients in %f secs, throughtput %f bps per-client (16QAM), current task queue length %d\n", 
                         samples_num_per_UE, UE_NUM, diff.count(), samples_num_per_UE * log2(16.0f) / diff.count(), task_queue_.size_approx());
                     demul_begin = std::chrono::system_clock::now();
@@ -291,13 +302,29 @@ void* CoMP::taskThread(void* context)
     }
 #endif
 
+    int total_count = 0;
+    int miss_count = 0;
     Event_data event;
     bool ret = false;
     while(true)
     {
         ret = task_queue_->try_dequeue(event);
+        if(tid == 8)
+            total_count++;
+        if(tid == 8 && total_count == 1e6)
+        {
+            printf("thread 0 task dequeue miss rate %f, queue length %d\n", (float)miss_count / total_count, task_queue_->size_approx());
+            total_count = 0;
+            miss_count = 0;
+        }
         if(!ret)
+        {
+            if(tid == 8)
+                miss_count++;
             continue;
+        }
+
+
         if(event.event_type == TASK_CROP)
         {   
             obj_ptr->doCrop(tid, event.data);
@@ -431,11 +458,12 @@ void CoMP::doDemul(int tid, int offset)
     Event_data demul_finish_event;
     demul_finish_event.event_type = EVENT_DEMUL;
     demul_finish_event.data = offset;
-
+    /* 
     if ( !message_queue_.enqueue( demul_finish_event ) ) {
         printf("Demuliplexing message enqueue failed\n");
         exit(0);
     }
+    */
     //printf("put demul event\n");
 }
 
@@ -520,7 +548,8 @@ void CoMP::doCrop(int tid, int offset)
         
         for(int j = 0; j < OFDM_CA_NUM; j++)
         {
-            data_buffer_.data[frame_offset][ant_id + j * BS_ANT_NUM] = fft_buffer_.FFT_outputs[FFT_buffer_target_id][j];
+            //data_buffer_.data[frame_offset][ant_id * OFDM_CA_NUM + j] = fft_buffer_.FFT_outputs[FFT_buffer_target_id][j];
+            //data_buffer_.data[frame_offset][ant_id + j * BS_ANT_NUM] = fft_buffer_.FFT_outputs[FFT_buffer_target_id][j];
         }
         
     }

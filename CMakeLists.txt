@@ -7,7 +7,7 @@ set(CMAKE_C_FLAGS "-std=c99 -w -mavx -mavx2  ")
 set(CMAKE_CXX_FLAGS "-std=c++11 -w -O3 -mavx -mavx2 -march=native")
 
 
-add_executable(sender sender_cli.cpp packageSender.cpp)
+add_executable(sender sender_cli.cpp packageSender.cpp cpu_attach.cpp)
 target_link_libraries(sender -lpthread)
 
 add_executable(receiver receiver_cli.cpp packageReceiver.cpp cpu_attach.cpp )
