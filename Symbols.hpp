@@ -1,7 +1,7 @@
 #ifndef SYMBOLS
 #define SYMBOLS
 
-#define ENABLE_CPU_ATTACH
+//#define ENABLE_CPU_ATTACH
 
 #define BS_ANT_NUM 96
 #define OFDM_CA_NUM 1024

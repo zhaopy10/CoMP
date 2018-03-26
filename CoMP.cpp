@@ -162,7 +162,8 @@ void CoMP::start()
             int FFT_buffer_target_id = event.data;
             // check subframe
             int frame_id, subframe_id, ant_id;
-            splitFFTBufferIndex(FFT_buffer_target_id, &frame_id, &subframe_id, &ant_id);
+            //splitFFTBufferIndex(FFT_buffer_target_id, &frame_id, &subframe_id, &ant_id);
+            splitSubframeBufferIndex(FFT_buffer_target_id, &frame_id, &subframe_id);
                    
             int cropper_checker_id = frame_id * subframe_num_perframe + subframe_id;
             cropper_checker_[cropper_checker_id] ++;
@@ -295,9 +296,13 @@ void* CoMP::taskThread(void* context)
     printf("task thread %d starts\n", tid);
 
 #ifdef ENABLE_CPU_ATTACH
-    if(stick_this_thread_to_core(tid + SOCKET_THREAD_NUM + 1) != 0)
+    int offset_id = SOCKET_THREAD_NUM + 1;
+    int tar_core_id = tid + offset_id;
+    if(tar_core_id >= 18)
+        tar_core_id = (tar_core_id - 18) + 36;
+    if(stick_this_thread_to_core(tar_core_id) != 0)
     {
-        printf("stitch thread %d to core %d failed\n", tid, tid + 1);
+        printf("stitch thread %d to core %d failed\n", tid, tar_core_id);
         exit(0);
     }
 #endif
@@ -384,6 +389,19 @@ inline int CoMP::getFFTBufferIndex(int frame_id, int subframe_id, int ant_id)
     frame_id = frame_id % TASK_BUFFER_FRAME_NUM;
     return frame_id * (BS_ANT_NUM * subframe_num_perframe) + subframe_id * BS_ANT_NUM + ant_id;
 }
+
+inline int CoMP::getSubframeBufferIndex(int frame_id, int subframe_id)
+{
+    frame_id = frame_id % TASK_BUFFER_FRAME_NUM;
+    return frame_id * subframe_num_perframe + subframe_id;
+}
+
+inline void CoMP::splitSubframeBufferIndex(int FFT_buffer_target_id, int *frame_id, int *subframe_id)
+{
+    (*frame_id) = FFT_buffer_target_id / subframe_num_perframe;
+    (*subframe_id) = FFT_buffer_target_id - (*frame_id) * subframe_num_perframe;
+}
+
 
 inline void CoMP::splitFFTBufferIndex(int FFT_buffer_target_id, int *frame_id, int *subframe_id, int *ant_id)
 {
@@ -565,7 +583,7 @@ void CoMP::doCrop(int tid, int offset)
     // inform main thread
     Event_data crop_finish_event;
     crop_finish_event.event_type = EVENT_CROPPED;
-    crop_finish_event.data = FFT_buffer_target_id;
+    crop_finish_event.data = getSubframeBufferIndex(frame_id, subframe_id);
 
     if ( !message_queue_.enqueue( crop_finish_event ) ) {
         printf("crop message enqueue failed\n");
