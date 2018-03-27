@@ -127,7 +127,7 @@ void CoMP::start()
     while(true)
     {
         // get an event
-        ret = message_queue_.try_dequeue(event);
+        ret = message_queue_.try_dequeue(ctok, event);
         total_count++;
         if(total_count == 1e7)
         {
@@ -150,7 +150,7 @@ void CoMP::start()
             Event_data do_crop_task;
             do_crop_task.event_type = TASK_CROP;
             do_crop_task.data = offset;
-            if ( !task_queue_.enqueue( do_crop_task ) ) {
+            if ( !task_queue_.enqueue(ptok, do_crop_task ) ) {
                 printf("crop task enqueue failed\n");
                 exit(0);
             }
@@ -187,7 +187,7 @@ void CoMP::start()
                         {
                             int csi_offset_id = frame_id * OFDM_CA_NUM + i;
                             do_ZF_task.data = csi_offset_id;
-                            if ( !task_queue_.enqueue( do_ZF_task ) ) {
+                            if ( !task_queue_.enqueue(ptok, do_ZF_task ) ) {
                                 printf("ZF task enqueue failed\n");
                                 exit(0);
                             }
@@ -213,7 +213,7 @@ void CoMP::start()
                                 int demul_offset_id = frame_id * OFDM_CA_NUM * data_subframe_num_perframe
                                     + j * OFDM_CA_NUM + i;
                                 do_demul_task.data = demul_offset_id;
-                                if ( !task_queue_.enqueue( do_demul_task ) ) {
+                                if ( !task_queue_.enqueue(ptok, do_demul_task ) ) {
                                     printf("Demuliplexing task enqueue failed\n");
                                     exit(0);
                                 }

@@ -75,6 +75,9 @@ private:
 
     moodycamel::ConcurrentQueue<Event_data> task_queue_ = moodycamel::ConcurrentQueue<Event_data>(SOCKET_BUFFER_FRAME_NUM * subframe_num_perframe * BS_ANT_NUM);
     moodycamel::ConcurrentQueue<Event_data> message_queue_ = moodycamel::ConcurrentQueue<Event_data>(SOCKET_BUFFER_FRAME_NUM * subframe_num_perframe * BS_ANT_NUM);
+    
+    moodycamel::ProducerToken ptok(task_queue_);
+    moodycamel::ConsumerToken ctok(message_queue_);
 
     bool task_status_[TASK_THREAD_NUM]; // can only be accessed in main_thread
 
