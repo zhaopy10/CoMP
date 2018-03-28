@@ -97,6 +97,8 @@ void* PackageReceiver::loopRecv(void *in_context)
     }
 #endif
 
+    moodycamel::ProducerToken local_ptok(*message_queue_);
+
     char* buffer = obj_ptr->buffer_[tid];
     int* buffer_status = obj_ptr->buffer_status_[tid];
     int buffer_length = obj_ptr->buffer_length_;
@@ -143,7 +145,7 @@ void* PackageReceiver::loopRecv(void *in_context)
         Event_data package_message;
         package_message.event_type = EVENT_PACKAGE_RECEIVED;
         package_message.data = offset + tid * buffer_frame_num;
-        if ( !message_queue_->enqueue( package_message ) ) {
+        if ( !message_queue_->enqueue(local_ptok, package_message ) ) {
             printf("socket message enqueue failed\n");
             exit(0);
         }

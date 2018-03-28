@@ -118,6 +118,9 @@ void CoMP::start()
     std::vector<pthread_t> recv_thread = receiver_->startRecv(socket_buffer_ptrs, 
         socket_buffer_status_ptrs, socket_buffer_[0].buffer_status.size(), socket_buffer_[0].buffer.size(), 1);
 
+    moodycamel::ProducerToken ptok(task_queue_);
+    moodycamel::ConsumerToken ctok(message_queue_);
+
     int demul_count = 0;
     auto demul_begin = std::chrono::system_clock::now();
     int miss_count = 0;
@@ -307,6 +310,8 @@ void* CoMP::taskThread(void* context)
     }
 #endif
 
+    obj_ptr->task_ptok[tid].reset(new moodycamel::ProducerToken(obj_ptr->message_queue_));
+
     int total_count = 0;
     int miss_count = 0;
     Event_data event;
@@ -482,7 +487,7 @@ void CoMP::doDemul(int tid, int offset)
     demul_finish_event.event_type = EVENT_DEMUL;
     demul_finish_event.data = offset;
     
-    if ( !message_queue_.enqueue( demul_finish_event ) ) {
+    if ( !message_queue_.enqueue(*task_ptok[tid], demul_finish_event ) ) {
         printf("Demuliplexing message enqueue failed\n");
         exit(0);
     }
@@ -511,7 +516,7 @@ void CoMP::doZF(int tid, int offset)
     ZF_finish_event.event_type = EVENT_ZF;
     ZF_finish_event.data = offset;
 
-    if ( !message_queue_.enqueue( ZF_finish_event ) ) {
+    if ( !message_queue_.enqueue(*task_ptok[tid], ZF_finish_event ) ) {
         printf("ZF message enqueue failed\n");
         exit(0);
     }
@@ -585,7 +590,7 @@ void CoMP::doCrop(int tid, int offset)
     crop_finish_event.event_type = EVENT_CROPPED;
     crop_finish_event.data = getSubframeBufferIndex(frame_id, subframe_id);
 
-    if ( !message_queue_.enqueue( crop_finish_event ) ) {
+    if ( !message_queue_.enqueue(*task_ptok[tid], crop_finish_event ) ) {
         printf("crop message enqueue failed\n");
         exit(0);
     }

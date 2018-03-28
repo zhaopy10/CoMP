@@ -50,6 +50,9 @@ public:
         int id;
     };
 
+    inline int getSubframeBufferIndex(int frame_id, int subframe_id);
+    inline void splitSubframeBufferIndex(int FFT_buffer_target_id, int *frame_id, int *subframe_id);
+
     inline int getFFTBufferIndex(int frame_id, int subframe_id, int ant_id);
     inline void splitFFTBufferIndex(int FFT_buffer_target_id, int *frame_id, int *subframe_id, int *ant_id);
 
@@ -76,8 +79,7 @@ private:
     moodycamel::ConcurrentQueue<Event_data> task_queue_ = moodycamel::ConcurrentQueue<Event_data>(SOCKET_BUFFER_FRAME_NUM * subframe_num_perframe * BS_ANT_NUM);
     moodycamel::ConcurrentQueue<Event_data> message_queue_ = moodycamel::ConcurrentQueue<Event_data>(SOCKET_BUFFER_FRAME_NUM * subframe_num_perframe * BS_ANT_NUM);
     
-    moodycamel::ProducerToken ptok(task_queue_);
-    moodycamel::ConsumerToken ctok(message_queue_);
+
 
     bool task_status_[TASK_THREAD_NUM]; // can only be accessed in main_thread
 
@@ -100,6 +102,8 @@ private:
     int max_queue_delay = 0;
 
     int debug_count = 0;
+
+    std::unique_ptr<moodycamel::ProducerToken> task_ptok[TASK_THREAD_NUM];
 };
 
 #endif
