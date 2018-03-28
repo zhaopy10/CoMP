@@ -125,12 +125,13 @@ void CoMP::start()
     auto demul_begin = std::chrono::system_clock::now();
     int miss_count = 0;
     int total_count = 0;
-    Event_data event;
-    bool ret = false;
+
+    Event_data events_list[dequeue_bulk_size];
+    int ret = 0;
     while(true)
     {
         // get an event
-        ret = message_queue_.try_dequeue(ctok, event);
+        ret = message_queue_.try_dequeue_bulk(ctok, events_list, dequeue_bulk_size);
         total_count++;
         if(total_count == 1e7)
         {
@@ -138,152 +139,156 @@ void CoMP::start()
             total_count = 0;
             miss_count = 0;
         }
-        if(!ret)
+        if(ret == 0)
         {
             miss_count++;
             continue;
         }
 
-        
-
-        // according to the event type
-        if(event.event_type == EVENT_PACKAGE_RECEIVED)
+        for(int bulk_count = 0; bulk_count < ret; bulk_count ++)
         {
-            int offset = event.data;
-            Event_data do_crop_task;
-            do_crop_task.event_type = TASK_CROP;
-            do_crop_task.data = offset;
-            if ( !task_queue_.enqueue(ptok, do_crop_task ) ) {
-                printf("crop task enqueue failed\n");
-                exit(0);
-            }
+            Event_data& event = events_list[bulk_count];
 
-            
-        }
-        else if(event.event_type == EVENT_CROPPED)
-        {
-            int FFT_buffer_target_id = event.data;
-            // check subframe
-            int frame_id, subframe_id, ant_id;
-            //splitFFTBufferIndex(FFT_buffer_target_id, &frame_id, &subframe_id, &ant_id);
-            splitSubframeBufferIndex(FFT_buffer_target_id, &frame_id, &subframe_id);
-                   
-            int cropper_checker_id = frame_id * subframe_num_perframe + subframe_id;
-            cropper_checker_[cropper_checker_id] ++;
-
-            if(cropper_checker_[cropper_checker_id] == BS_ANT_NUM) // this sub-frame is finished
+            // according to the event type
+            if(event.event_type == EVENT_PACKAGE_RECEIVED)
             {
-                cropper_checker_[cropper_checker_id] = 0; // this subframe is finished
-                if(isPilot(subframe_id))
-                {
-                    int csi_checker_id = frame_id;
-                    csi_checker_[csi_checker_id] ++;
-                    if(csi_checker_[csi_checker_id] == UE_NUM)
-                    {
-                        csi_checker_[csi_checker_id] = 0;
-                        //if(frame_id == 4)
-                        //    printf("Frame %d, csi ready, assign ZF\n", frame_id);
-                        
-                        Event_data do_ZF_task;
-                        do_ZF_task.event_type = TASK_ZF;
-                        for(int i = 0; i < OFDM_CA_NUM; i++)
-                        {
-                            int csi_offset_id = frame_id * OFDM_CA_NUM + i;
-                            do_ZF_task.data = csi_offset_id;
-                            if ( !task_queue_.enqueue(ptok, do_ZF_task ) ) {
-                                printf("ZF task enqueue failed\n");
-                                exit(0);
-                            }
-                        }
-                    }
+                int offset = event.data;
+                Event_data do_crop_task;
+                do_crop_task.event_type = TASK_CROP;
+                do_crop_task.data = offset;
+                if ( !task_queue_.enqueue(ptok, do_crop_task ) ) {
+                    printf("crop task enqueue failed\n");
+                    exit(0);
                 }
-                else if(isData(subframe_id))
+
+                
+            }
+            else if(event.event_type == EVENT_CROPPED)
+            {
+                int FFT_buffer_target_id = event.data;
+                // check subframe
+                int frame_id, subframe_id, ant_id;
+                //splitFFTBufferIndex(FFT_buffer_target_id, &frame_id, &subframe_id, &ant_id);
+                splitSubframeBufferIndex(FFT_buffer_target_id, &frame_id, &subframe_id);
+                       
+                int cropper_checker_id = frame_id * subframe_num_perframe + subframe_id;
+                cropper_checker_[cropper_checker_id] ++;
+
+                if(cropper_checker_[cropper_checker_id] == BS_ANT_NUM) // this sub-frame is finished
                 {
-                    int data_checker_id = frame_id;
-                    data_checker_[data_checker_id] ++;
-                    if(data_checker_[data_checker_id] == data_subframe_num_perframe)
+                    cropper_checker_[cropper_checker_id] = 0; // this subframe is finished
+                    if(isPilot(subframe_id))
                     {
-                        //printf("do demul for frame %d\n", frame_id);
-                        //printf("frame %d data received\n", frame_id);
-                        data_checker_[data_checker_id] = 0;
-                        // just forget check, and optimize it later
-                        Event_data do_demul_task;
-                        do_demul_task.event_type = TASK_DEMUL;
-                        for(int j = 0; j < data_subframe_num_perframe; j++)
+                        int csi_checker_id = frame_id;
+                        csi_checker_[csi_checker_id] ++;
+                        if(csi_checker_[csi_checker_id] == UE_NUM)
                         {
-                            for(int i = 0; i < OFDM_CA_NUM / demul_block_size; i++)
+                            csi_checker_[csi_checker_id] = 0;
+                            //if(frame_id == 4)
+                            //    printf("Frame %d, csi ready, assign ZF\n", frame_id);
+                            
+                            Event_data do_ZF_task;
+                            do_ZF_task.event_type = TASK_ZF;
+                            for(int i = 0; i < OFDM_CA_NUM; i++)
                             {
-                                int demul_offset_id = frame_id * OFDM_CA_NUM * data_subframe_num_perframe
-                                    + j * OFDM_CA_NUM + i;
-                                do_demul_task.data = demul_offset_id;
-                                if ( !task_queue_.enqueue(ptok, do_demul_task ) ) {
-                                    printf("Demuliplexing task enqueue failed\n");
+                                int csi_offset_id = frame_id * OFDM_CA_NUM + i;
+                                do_ZF_task.data = csi_offset_id;
+                                if ( !task_queue_.enqueue(ptok, do_ZF_task ) ) {
+                                    printf("ZF task enqueue failed\n");
                                     exit(0);
                                 }
                             }
                         }
-                    }     
-                }
-            }
-        }
-        else if(event.event_type == EVENT_ZF)
-        {
-            //printf("get ZF event\n");
-            int offset_zf = event.data;
-            // precoder is ready, do demodulation
-            int ca_id = offset_zf % OFDM_CA_NUM;
-            int frame_id = (offset_zf - ca_id) / OFDM_CA_NUM;
-            precoder_checker_[frame_id] ++;
-            if(precoder_checker_[frame_id] == OFDM_CA_NUM)
-            {
-                precoder_checker_[frame_id] = 0;
-                precoder_status_[frame_id] = true;
-                //if(frame_id == 0)
-                //    printf("frame %d precoder ready\n", frame_id);
-            }
-        }
-        else if(event.event_type == EVENT_DEMUL)
-        {
-            //printf("get demul event\n");
-            // do nothing
-            int offset_demul = event.data;
-            int ca_id = offset_demul % OFDM_CA_NUM;
-            int offset_without_ca = (offset_demul - ca_id) / OFDM_CA_NUM;
-            int data_subframe_id = offset_without_ca % (subframe_num_perframe - UE_NUM);
-            int frame_id = (offset_without_ca - data_subframe_id) / (subframe_num_perframe - UE_NUM);
-            demul_checker_[frame_id][data_subframe_id] += demul_block_size;
-            if(demul_checker_[frame_id][data_subframe_id] == OFDM_CA_NUM)
-            {
-                demul_checker_[frame_id][data_subframe_id] = 0;
-                /*
-                // debug
-                if(frame_id == 4 && data_subframe_id == 4)
-                {
-                    printf("save demul data\n");
-                    FILE* fp = fopen("ver_data.txt","w");
-                    for(int cc = 0; cc < OFDM_CA_NUM; cc++)
-                    {
-                        complex_float* cx = &demul_buffer_.data[offset_without_ca][cc * UE_NUM];
-                        for(int kk = 0; kk < UE_NUM; kk++)  
-                            fprintf(fp, "%f %f\n", cx[kk].real, cx[kk].imag);
                     }
-                    fclose(fp);
-                    exit(0);
-                }
-                */
-
-                demul_count += 1;
-                if(demul_count == data_subframe_num_perframe * 20)
-                {
-                    demul_count = 0;
-                    auto demul_end = std::chrono::system_clock::now();
-                    std::chrono::duration<double> diff = demul_end - demul_begin;
-                    int samples_num_per_UE = OFDM_CA_NUM * data_subframe_num_perframe * 20;
-                    printf("Receive %d samples (per-client) from %d clients in %f secs, throughtput %f bps per-client (16QAM), current task queue length %d\n", 
-                        samples_num_per_UE, UE_NUM, diff.count(), samples_num_per_UE * log2(16.0f) / diff.count(), task_queue_.size_approx());
-                    demul_begin = std::chrono::system_clock::now();
+                    else if(isData(subframe_id))
+                    {
+                        int data_checker_id = frame_id;
+                        data_checker_[data_checker_id] ++;
+                        if(data_checker_[data_checker_id] == data_subframe_num_perframe)
+                        {
+                            //printf("do demul for frame %d\n", frame_id);
+                            //printf("frame %d data received\n", frame_id);
+                            data_checker_[data_checker_id] = 0;
+                            // just forget check, and optimize it later
+                            Event_data do_demul_task;
+                            do_demul_task.event_type = TASK_DEMUL;
+                            for(int j = 0; j < data_subframe_num_perframe; j++)
+                            {
+                                for(int i = 0; i < OFDM_CA_NUM / demul_block_size; i++)
+                                {
+                                    int demul_offset_id = frame_id * OFDM_CA_NUM * data_subframe_num_perframe
+                                        + j * OFDM_CA_NUM + i;
+                                    do_demul_task.data = demul_offset_id;
+                                    if ( !task_queue_.enqueue(ptok, do_demul_task ) ) {
+                                        printf("Demuliplexing task enqueue failed\n");
+                                        exit(0);
+                                    }
+                                }
+                            }
+                        }     
+                    }
                 }
             }
+            else if(event.event_type == EVENT_ZF)
+            {
+                //printf("get ZF event\n");
+                int offset_zf = event.data;
+                // precoder is ready, do demodulation
+                int ca_id = offset_zf % OFDM_CA_NUM;
+                int frame_id = (offset_zf - ca_id) / OFDM_CA_NUM;
+                precoder_checker_[frame_id] ++;
+                if(precoder_checker_[frame_id] == OFDM_CA_NUM)
+                {
+                    precoder_checker_[frame_id] = 0;
+                    precoder_status_[frame_id] = true;
+                    //if(frame_id == 0)
+                    //    printf("frame %d precoder ready\n", frame_id);
+                }
+            }
+            else if(event.event_type == EVENT_DEMUL)
+            {
+                //printf("get demul event\n");
+                // do nothing
+                int offset_demul = event.data;
+                int ca_id = offset_demul % OFDM_CA_NUM;
+                int offset_without_ca = (offset_demul - ca_id) / OFDM_CA_NUM;
+                int data_subframe_id = offset_without_ca % (subframe_num_perframe - UE_NUM);
+                int frame_id = (offset_without_ca - data_subframe_id) / (subframe_num_perframe - UE_NUM);
+                demul_checker_[frame_id][data_subframe_id] += demul_block_size;
+                if(demul_checker_[frame_id][data_subframe_id] == OFDM_CA_NUM)
+                {
+                    demul_checker_[frame_id][data_subframe_id] = 0;
+                    /*
+                    // debug
+                    if(frame_id == 4 && data_subframe_id == 4)
+                    {
+                        printf("save demul data\n");
+                        FILE* fp = fopen("ver_data.txt","w");
+                        for(int cc = 0; cc < OFDM_CA_NUM; cc++)
+                        {
+                            complex_float* cx = &demul_buffer_.data[offset_without_ca][cc * UE_NUM];
+                            for(int kk = 0; kk < UE_NUM; kk++)  
+                                fprintf(fp, "%f %f\n", cx[kk].real, cx[kk].imag);
+                        }
+                        fclose(fp);
+                        exit(0);
+                    }
+                    */
+
+                    demul_count += 1;
+                    if(demul_count == data_subframe_num_perframe * 20)
+                    {
+                        demul_count = 0;
+                        auto demul_end = std::chrono::system_clock::now();
+                        std::chrono::duration<double> diff = demul_end - demul_begin;
+                        int samples_num_per_UE = OFDM_CA_NUM * data_subframe_num_perframe * 20;
+                        printf("Receive %d samples (per-client) from %d clients in %f secs, throughtput %f bps per-client (16QAM), current task queue length %d\n", 
+                            samples_num_per_UE, UE_NUM, diff.count(), samples_num_per_UE * log2(16.0f) / diff.count(), task_queue_.size_approx());
+                        demul_begin = std::chrono::system_clock::now();
+                    }
+                }
+            }
+
         }
     }
 

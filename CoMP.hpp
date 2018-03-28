@@ -33,6 +33,7 @@ public:
     static const int TASK_BUFFER_FRAME_NUM = 60;
 
     static const int demul_block_size = 32;
+    static const int dequeue_bulk_size = 5;
 
     CoMP();
     ~CoMP();
