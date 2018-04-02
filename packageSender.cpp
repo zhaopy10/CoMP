@@ -17,7 +17,7 @@ socket_num(in_socket_num), cur_ptr_(0), core_offset(in_core_offset)
     {
         int rand_port = rand() % 65536;
         cliaddr_.sin_family = AF_INET;
-        cliaddr_.sin_port = htons(rand_port);  // out going port is random
+        cliaddr_.sin_port = htons(0);  // out going port is random
         //cliaddr_.sin_addr.s_addr = inet_addr("127.0.0.1");
         memset(cliaddr_.sin_zero, 0, sizeof(cliaddr_.sin_zero));  
 
@@ -27,8 +27,8 @@ socket_num(in_socket_num), cur_ptr_(0), core_offset(in_core_offset)
         }
 
         /*Bind socket with address struct*/
-        //if(bind(socket_[i], (struct sockaddr *) &cliaddr_, sizeof(cliaddr_)) != 0)
-        //    perror("socket bind failed");
+        if(bind(socket_[i], (struct sockaddr *) &cliaddr_, sizeof(cliaddr_)) != 0)
+            perror("socket bind failed");
     }
 
     /* initialize random seed: */
@@ -192,15 +192,13 @@ void* PackageSender::loopSend(void *in_context)
         obj_ptr->buffer_len_ --;
         pthread_mutex_unlock( &obj_ptr->lock_ );
 
-for(int p = 0; p < 10; p++)
-	rand();
-
         used_socker_id = data_ptr % socket_per_thread + socket_per_thread * tid;
         /* send a message to the server */
         if (sendto(obj_ptr->socket_[used_socker_id], obj_ptr->trans_buffer_[data_ptr].data(), obj_ptr->buffer_length, 0, (struct sockaddr *)&obj_ptr->servaddr_, sizeof(obj_ptr->servaddr_)) < 0) {
             perror("socket sendto failed");
             exit(0);
         }
+
 
         package_count++;
         if(package_count == (int)1e5)

@@ -25,8 +25,8 @@ class CoMP
 {
 public:
     static const int MAX_EPOLL_EVENTS_PER_RUN = 4;
-    static const int TASK_THREAD_NUM = 10;
-    static const int SOCKET_THREAD_NUM = 2;
+    static const int TASK_THREAD_NUM = 28;
+    static const int SOCKET_THREAD_NUM = 7;
     static const int MAX_EVENT_NUM = TASK_THREAD_NUM + 1;
 
     static const int SOCKET_BUFFER_FRAME_NUM = 80; // buffer 10 frames
@@ -77,8 +77,8 @@ private:
 
     mufft_plan_1d* muplans_[TASK_THREAD_NUM];
 
-    moodycamel::ConcurrentQueue<Event_data> task_queue_ = moodycamel::ConcurrentQueue<Event_data>(SOCKET_BUFFER_FRAME_NUM * subframe_num_perframe * BS_ANT_NUM);
-    moodycamel::ConcurrentQueue<Event_data> message_queue_ = moodycamel::ConcurrentQueue<Event_data>(SOCKET_BUFFER_FRAME_NUM * subframe_num_perframe * BS_ANT_NUM);
+    moodycamel::ConcurrentQueue<Event_data> task_queue_ = moodycamel::ConcurrentQueue<Event_data>(SOCKET_BUFFER_FRAME_NUM * subframe_num_perframe * BS_ANT_NUM  * 36);
+    moodycamel::ConcurrentQueue<Event_data> message_queue_ = moodycamel::ConcurrentQueue<Event_data>(SOCKET_BUFFER_FRAME_NUM * subframe_num_perframe * BS_ANT_NUM  * 36);
     
 
 

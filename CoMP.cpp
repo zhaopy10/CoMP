@@ -135,7 +135,7 @@ void CoMP::start()
         total_count++;
         if(total_count == 1e7)
         {
-            printf("message dequeue miss rate %f\n", (float)miss_count / total_count);
+            //printf("message dequeue miss rate %f\n", (float)miss_count / total_count);
             total_count = 0;
             miss_count = 0;
         }
@@ -156,9 +156,12 @@ void CoMP::start()
                 Event_data do_crop_task;
                 do_crop_task.event_type = TASK_CROP;
                 do_crop_task.data = offset;
-                if ( !task_queue_.enqueue(ptok, do_crop_task ) ) {
-                    printf("crop task enqueue failed\n");
-                    exit(0);
+                if ( !task_queue_.try_enqueue(ptok, do_crop_task ) ) {
+                    printf("need more memory\n");
+                    if ( !task_queue_.enqueue(ptok, do_crop_task ) ) {
+                        printf("crop task enqueue failed\n");
+                        exit(0);
+                    }
                 }
 
                 
@@ -176,6 +179,8 @@ void CoMP::start()
 
                 if(cropper_checker_[cropper_checker_id] == BS_ANT_NUM) // this sub-frame is finished
                 {
+                    //printf("subframe %d, frame %d\n", subframe_id, frame_id);
+
                     cropper_checker_[cropper_checker_id] = 0; // this subframe is finished
                     if(isPilot(subframe_id))
                     {
@@ -193,9 +198,12 @@ void CoMP::start()
                             {
                                 int csi_offset_id = frame_id * OFDM_CA_NUM + i;
                                 do_ZF_task.data = csi_offset_id;
-                                if ( !task_queue_.enqueue(ptok, do_ZF_task ) ) {
-                                    printf("ZF task enqueue failed\n");
-                                    exit(0);
+                                if ( !task_queue_.try_enqueue(ptok, do_ZF_task ) ) {
+                                    printf("need more memory\n");
+                                    if ( !task_queue_.enqueue(ptok, do_ZF_task ) ) {
+                                        printf("ZF task enqueue failed\n");
+                                        exit(0);
+                                    }
                                 }
                             }
                         }
@@ -217,11 +225,14 @@ void CoMP::start()
                                 for(int i = 0; i < OFDM_CA_NUM / demul_block_size; i++)
                                 {
                                     int demul_offset_id = frame_id * OFDM_CA_NUM * data_subframe_num_perframe
-                                        + j * OFDM_CA_NUM + i;
+                                        + j * OFDM_CA_NUM + i * demul_block_size;
                                     do_demul_task.data = demul_offset_id;
-                                    if ( !task_queue_.enqueue(ptok, do_demul_task ) ) {
-                                        printf("Demuliplexing task enqueue failed\n");
-                                        exit(0);
+                                    if ( !task_queue_.try_enqueue(ptok, do_demul_task ) ) {
+                                        printf("need more memory\n");
+                                        if ( !task_queue_.enqueue(ptok, do_demul_task ) ) {
+                                            printf("Demultiplexing task enqueue failed\n");
+                                            exit(0);
+                                        }
                                     }
                                 }
                             }
@@ -328,7 +339,7 @@ void* CoMP::taskThread(void* context)
             total_count++;
         if(tid == 0 && total_count == 1e6)
         {
-            printf("thread 0 task dequeue miss rate %f, queue length %d\n", (float)miss_count / total_count, task_queue_->size_approx());
+            //printf("thread 0 task dequeue miss rate %f, queue length %d\n", (float)miss_count / total_count, task_queue_->size_approx());
             total_count = 0;
             miss_count = 0;
         }
@@ -455,37 +466,41 @@ void CoMP::doDemul(int tid, int offset)
         cx_fmat mat_demuled(demul_ptr, UE_NUM, 1, false);
 
         mat_demuled = mat_precoder * mat_data;
+/*
+        //debug
+        if(ca_id == 0 && i == 0 && frame_id == 4 && data_subframe_id == 0)
+        {
+            printf("thread %d, save mat precoder\n", tid);
+            FILE* fp_debug = fopen("tmpPrecoder.txt", "w");
+            for(int i = 0; i < UE_NUM; i++)
+            {
+                for(int j = 0; j < BS_ANT_NUM; j++)
+                    fprintf(fp_debug, "%f %f ", mat_precoder.at(i,j).real(), mat_precoder.at(i,j).imag());
+                fprintf(fp_debug, "\n" );
+            }
+            fclose(fp_debug);
+
+            fp_debug = fopen("tmpData.txt","w");
+            for(int i = 0; i < BS_ANT_NUM; i++)
+                fprintf(fp_debug, "%f %f\n", mat_data.at(i,0).real(), mat_data.at(i,0).imag());
+            fclose(fp_debug);
+
+            fp_debug = fopen("tmpDemul.txt","w");
+            for(int i = 0; i < UE_NUM; i++)
+                fprintf(fp_debug, "%f %f\n", mat_demuled.at(i,0).real(), mat_demuled.at(i,0).imag());
+            fclose(fp_debug);
+            
+            exit(0);
+        }
+*/
+
     }
 
     
 
-    /*
-    //debug
-    if(ca_id == 2 && frame_id == 4)
-    {
-        printf("save mat precoder\n");
-        FILE* fp_debug = fopen("tmpPrecoder.txt", "w");
-        for(int i = 0; i < UE_NUM; i++)
-        {
-            for(int j = 0; j < BS_ANT_NUM; j++)
-                fprintf(fp_debug, "%f %f ", mat_precoder.at(i,j).real(), mat_precoder.at(i,j).imag());
-            fprintf(fp_debug, "\n" );
-        }
-        fclose(fp_debug);
-
-        fp_debug = fopen("tmpData.txt","w");
-        for(int i = 0; i < BS_ANT_NUM; i++)
-            fprintf(fp_debug, "%f %f\n", mat_data.at(i,0).real(), mat_data.at(i,0).imag());
-        fclose(fp_debug);
-
-        fp_debug = fopen("tmpDemul.txt","w");
-        for(int i = 0; i < UE_NUM; i++)
-            fprintf(fp_debug, "%f %f\n", mat_demuled.at(i,0).real(), mat_demuled.at(i,0).imag());
-        fclose(fp_debug);
-        
-        exit(0);
-    }
-    */
+    
+    
+    
 
     // inform main thread
     Event_data demul_finish_event;
