@@ -59,26 +59,19 @@ void saveData(char* filename, complex_float* ptr, int row, int col)
 int main(int argc, char** argv)
 {
 				//__m128i index = _mm_setr_epi32(0, 1, 2, 3);
-				__m256i index = _mm256_set_epi64x(0, 0, 1, 1);
-				long int debug_ids[4];
-				_mm256_store_si256((__m256i *)debug_ids, index);
-				printf("%d %d %d %d\n", debug_ids[0], debug_ids[1], debug_ids[2], debug_ids[3]);
-
+				__m256i index = _mm256_setr_epi64x(0, 4, 8, 12);
+			
 				myVec debug_memory;
-				debug_memory.resize(4);
-				double* debug_data_double = (double *)debug_memory.data();
+				debug_memory.resize(16);
 				float* debug_data_float = (float *)debug_memory.data();
-				for(int kk = 0; kk < 4; kk++)
-					debug_data_double[kk] = -1.0f * kk;
-				//for(int kk = 0; kk < 8; kk++)
-				//	debug_data_float[kk] = 1.0f * kk;
-				__m256d t_data = _mm256_i64gather_pd(debug_data_double + 1, index, 1);
+				for(int kk = 0; kk < 32; kk++)
+					debug_data_float[kk] = 1.0f * kk;
+				__m256d t_data = _mm256_i64gather_pd((double*)debug_data_float, index, 8);
 				//__m256d t_data = _mm256_load_pd((double*)debug_data_float);
 
 				// debug
 				double debug[4];
 				_mm256_store_pd(debug, t_data);
-				printf("%f %f %f %f\n", debug[0], debug[1], debug[2], debug[3]);
 				float* debug_float_ptr = (float*)debug;
 				printf("%f %f %f %f %f %f %f %f\n", debug_float_ptr[0], debug_float_ptr[1], debug_float_ptr[2], debug_float_ptr[3],
 					debug_float_ptr[4], debug_float_ptr[5], debug_float_ptr[6], debug_float_ptr[7]);
@@ -344,23 +337,27 @@ int main(int argc, char** argv)
 		}
 
 
-		__m128i index = _mm_setr_epi32(0, 1, 2, 3);
+		__m256i index = _mm256_setr_epi64x(0, 4, 8, 12);
 		for(int c1 = 0; c1 < OFDM; c1++)
 		{
 			for(int c2 = 0; c2 < BS_ANT / 4; c2++)
 			{
-				/*
-				int c1_base = OFDM / 4;
-				int c1_offset = OFDM % 4;
-				float* base_ptr = tar_ptr + c1_base * 8 * BS_ANT + c1_offset * 2 + c2 * 4 * 8;
-				__m256d t_data = _mm256_i32gather_pd((double*)base_ptr, index, 4);
-				_mm256_store_pd((double*)(temp_buffer_ptr + c2 * 8), t_data);
-				*/
 				
+				int c1_base = c1 / 4;
+				int c1_offset = c1 % 4;
+				float* base_ptr = tar_ptr + c1_base * 8 * BS_ANT + c1_offset * 2 + c2 * 4 * 8;
+				__m256d t_data = _mm256_i64gather_pd((double*)base_ptr, index, 8);
+				_mm256_store_pd((double*)(temp_buffer_ptr + c2 * 8), t_data);
+				
+
+				//__m256d t_data = _mm256_i64gather_pd((double*)tar_ptr, index, 8);
+				//_mm256_store_pd((double*)temp_buffer_ptr, t_data);
+
+				if(c1 == 0 && i == 0 && c2 == 0)
+					for(int kk = 0; kk < 8; kk++)
+						printf("%f\n", temp_buffer_ptr[kk]);
 			}
-			if(c1 == 0 && i == 0)
-				for(int kk = 0; kk < BS_ANT * 2; kk++)
-					printf("%f\n", temp_buffer_ptr[kk]);
+			
 
 			cx_float* data_ptr = (cx_float *)(&temp_buffer[0]);
 			cx_fmat mat_data(data_ptr, BS_ANT, 1, false);
