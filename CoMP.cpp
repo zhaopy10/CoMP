@@ -596,7 +596,6 @@ void CoMP::doCrop(int tid, int offset)
         
         for(int j = 0; j < OFDM_CA_NUM; j++)
         {
-            //data_buffer_.data[frame_offset][ant_id * OFDM_CA_NUM + j] = fft_buffer_.FFT_outputs[FFT_buffer_target_id][j];
             data_buffer_.data[frame_offset][ant_id + j * BS_ANT_NUM] = fft_buffer_.FFT_outputs[FFT_buffer_target_id][j];
         }
         

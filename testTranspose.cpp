@@ -15,7 +15,7 @@
 #define BS_ANT 96
 #define K 4
 
-#define LOOP_NUM 1e3
+#define LOOP_NUM 1e4
 
 
 struct complex_float {
@@ -58,23 +58,6 @@ void saveData(char* filename, complex_float* ptr, int row, int col)
 
 int main(int argc, char** argv)
 {
-				//__m128i index = _mm_setr_epi32(0, 1, 2, 3);
-				__m256i index = _mm256_setr_epi64x(0, 4, 8, 12);
-			
-				myVec debug_memory;
-				debug_memory.resize(16);
-				float* debug_data_float = (float *)debug_memory.data();
-				for(int kk = 0; kk < 32; kk++)
-					debug_data_float[kk] = 1.0f * kk;
-				__m256d t_data = _mm256_i64gather_pd((double*)debug_data_float, index, 8);
-				//__m256d t_data = _mm256_load_pd((double*)debug_data_float);
-
-				// debug
-				double debug[4];
-				_mm256_store_pd(debug, t_data);
-				float* debug_float_ptr = (float*)debug;
-				printf("%f %f %f %f %f %f %f %f\n", debug_float_ptr[0], debug_float_ptr[1], debug_float_ptr[2], debug_float_ptr[3],
-					debug_float_ptr[4], debug_float_ptr[5], debug_float_ptr[6], debug_float_ptr[7]);
 
 	srand(0);
 	printf("test\n");
@@ -247,20 +230,19 @@ int main(int argc, char** argv)
 			cx_fmat mat_result(result_ptr, K, 1, false);
 
 			mat_result = mat_precoder * mat_data;
-
+/*
 			if(i == 0 && c1 == 0)
 			{
 				saveData("demul_ca_0_baseline.txt", (complex_float*)result_ptr, K, 1);
 				saveData("data_ca_0_baseline.txt", (complex_float*)data_ptr, BS_ANT, 1);
 				saveData("precoder_ca_0_baseline.txt", (complex_float*)precoder_ptr, K, BS_ANT);
 			}
+			*/
 		}
 	}
 	end = std::chrono::system_clock::now();
 	diff = end - begin;
 	printf("naive trans and precoding time %f\n", diff.count());
-
-	saveData("data_trans.txt", buffer_trans.data(), OFDM, BS_ANT);
 
 
 	flushCache();
@@ -284,78 +266,31 @@ int main(int argc, char** argv)
 			cx_fmat mat_result(result_ptr, K, 1, false);
 
 			mat_result = mat_precoder * mat_data;
-
-			if(i == 0 && c1 == 0)
-			{
-				saveData("demul_ca_0_read.txt", (complex_float*)result_ptr, K, 1);
-				saveData("data_ca_0_read.txt", (complex_float*)data_ptr, BS_ANT, 1);
-				saveData("precoder_ca_0_read.txt", (complex_float*)precoder_ptr, K, BS_ANT);
-			}
 		}
 	}
 	end = std::chrono::system_clock::now();
 	diff = end - begin;
 	printf("no copy and (read trans) precoding time %f\n", diff.count());
 
-/*
-	begin = std::chrono::system_clock::now();
-	for (int i = 0; i < LOOP_NUM; ++i)
-	{
-		// save buffer_trans as 8 column blocks
-		float* src_ptr = (float*)buffer.data();
-		float* tar_ptr = (float*)buffer_trans.data();
-		for(int c1 = 0; c1 < BS_ANT; c1++)
-		{
-			for(int c2 = 0; c2 < OFDM / 4; c2++)
-			{
-				__m256 data = _mm256_load_ps(src_ptr + c1 * OFDM * 2 + c2 * 8);
-				_mm256_store_ps(tar_ptr + c2 * BS_ANT * 8 + 8 * c1, data);
-			}
-		}
-
-	}
-	end = std::chrono::system_clock::now();
-	diff = end - begin;
-	printf("block trans time %f\n", diff.count());
-*/
 
 	flushCache();
 	begin = std::chrono::system_clock::now();
 	float* temp_buffer_ptr = (float*)(temp_buffer.data());
 	for (int i = 0; i < LOOP_NUM; ++i)
 	{
-		// save buffer_trans as 8 column blocks
 		float* src_ptr = (float*)buffer.data();
-		float* tar_ptr = (float*)buffer_trans.data();
-		for(int c1 = 0; c1 < BS_ANT; c1++)
-		{
-			for(int c2 = 0; c2 < OFDM / 4; c2++)
-			{
-				__m256 data = _mm256_load_ps(src_ptr + c1 * OFDM * 2 + c2 * 8);
-				_mm256_store_ps(tar_ptr + c2 * BS_ANT * 8 + 8 * c1, data);
-			}
-		}
-
-
-		__m256i index = _mm256_setr_epi64x(0, 4, 8, 12);
+		__m256i index = _mm256_setr_epi64x(0, 1024, 2048, 3072);
 		for(int c1 = 0; c1 < OFDM; c1++)
 		{
 			for(int c2 = 0; c2 < BS_ANT / 4; c2++)
 			{
-				
-				int c1_base = c1 / 4;
-				int c1_offset = c1 % 4;
-				float* base_ptr = tar_ptr + c1_base * 8 * BS_ANT + c1_offset * 2 + c2 * 4 * 8;
+				float* base_ptr = src_ptr + c2 * 4 * 1024 * 2 + c1 * 2;
 				__m256d t_data = _mm256_i64gather_pd((double*)base_ptr, index, 8);
 				_mm256_store_pd((double*)(temp_buffer_ptr + c2 * 8), t_data);
 				
 
 				//__m256d t_data = _mm256_i64gather_pd((double*)tar_ptr, index, 8);
 				//_mm256_store_pd((double*)temp_buffer_ptr, t_data);
-
-				if(c1 == 0 && i == 0 && c2 == 0)
-					for(int kk = 0; kk < 8; kk++)
-						printf("%f\n", temp_buffer_ptr[kk]);
 			}
 			
 
@@ -369,13 +304,105 @@ int main(int argc, char** argv)
 			cx_fmat mat_result(result_ptr, K, 1, false);
 
 			mat_result = mat_precoder * mat_data;
+		}
 
+	}
+	end = std::chrono::system_clock::now();
+	diff = end - begin;
+	printf("no copy and (SIMD read) precoding time %f\n", diff.count());
+
+
+	flushCache();
+	begin = std::chrono::system_clock::now();
+	for (int i = 0; i < LOOP_NUM; ++i)
+	{
+		int BLOCK = 64; // 8 float per row
+
+		// save buffer_trans as 8 column blocks
+		float* src_ptr = (float*)buffer.data();
+		float* tar_ptr = (float*)buffer_trans.data();
+		for(int c1 = 0; c1 < BS_ANT; c1++)
+		{
+			for(int c2 = 0; c2 < OFDM / BLOCK * 2; c2++)
+			{
+				for(int c3 = 0; c3 < BLOCK / 8; c3++)
+				{
+					__m256 data = _mm256_load_ps(src_ptr + c1 * OFDM * 2 + c2 * BLOCK + c3 * 8);
+					_mm256_store_ps(tar_ptr + c2 * BS_ANT * BLOCK + BLOCK * c1 + c3 * 8, data);
+				}
+				
+			}
+		}
+
+
+	}
+	end = std::chrono::system_clock::now();
+	diff = end - begin;
+	printf("block trans time %f\n", diff.count());
+
+
+
+	flushCache();
+	begin = std::chrono::system_clock::now();
+	//float* temp_buffer_ptr = (float*)(temp_buffer.data());
+	for (int i = 0; i < LOOP_NUM; ++i)
+	{
+		int BLOCK = 64; // 8 float per row
+
+		// save buffer_trans as 8 column blocks
+		float* src_ptr = (float*)buffer.data();
+		float* tar_ptr = (float*)buffer_trans.data();
+		for(int c1 = 0; c1 < BS_ANT; c1++)
+		{
+			for(int c2 = 0; c2 < OFDM / BLOCK * 2; c2++)
+			{
+				for(int c3 = 0; c3 < BLOCK / 8; c3++)
+				{
+					__m256 data = _mm256_load_ps(src_ptr + c1 * OFDM * 2 + c2 * BLOCK + c3 * 8);
+					_mm256_store_ps(tar_ptr + c2 * BS_ANT * BLOCK + BLOCK * c1 + c3 * 8, data);
+				}
+				
+			}
+		}
+
+
+		__m256i index = _mm256_setr_epi64x(0, BLOCK/2, BLOCK/2 * 2, BLOCK/2 * 3);
+		for(int c1 = 0; c1 < OFDM; c1++)
+		{
+			for(int c2 = 0; c2 < BS_ANT / 4; c2++)
+			{
+				
+				int c1_base = c1*2 / BLOCK;
+				int c1_offset = c1*2 % BLOCK;
+				float* base_ptr = tar_ptr + c1_base * BLOCK * BS_ANT + c1_offset + c2 * BLOCK * 4;
+				__m256d t_data = _mm256_i64gather_pd((double*)base_ptr, index, 8);
+				_mm256_store_pd((double*)(temp_buffer_ptr + c2 * 8), t_data);
+				
+
+				//__m256d t_data = _mm256_i64gather_pd((double*)tar_ptr, index, 8);
+				//_mm256_store_pd((double*)temp_buffer_ptr, t_data);
+
+			}
+			
+
+			cx_float* data_ptr = (cx_float *)(&temp_buffer[0]);
+			cx_fmat mat_data(data_ptr, BS_ANT, 1, false);
+
+			cx_float* precoder_ptr = (cx_float*)precoder.data();
+			cx_fmat mat_precoder(precoder_ptr, K, BS_ANT, false);
+
+			cx_float* result_ptr = (cx_float*)result.data();
+			cx_fmat mat_result(result_ptr, K, 1, false);
+
+			mat_result = mat_precoder * mat_data;
+/*
 			if(i == 0 && c1 == 0)
 			{
 				saveData("demul_ca_0_SIMD.txt", (complex_float*)result_ptr, K, 1);
 				saveData("data_ca_0_SIMD.txt", (complex_float*)data_ptr, BS_ANT, 1);
 				saveData("precoder_ca_0_SIMD.txt", (complex_float*)precoder_ptr, K, BS_ANT);
 			}
+*/
 		}
 
 	}
@@ -383,5 +410,6 @@ int main(int argc, char** argv)
 	diff = end - begin;
 	printf("no copy and (SIMD read trans) precoding time %f\n", diff.count());
 	saveData("data_trans_block.txt", buffer_trans.data(), OFDM*BS_ANT / 4, 4);
-	
+
+
 }
