@@ -16,7 +16,7 @@
 #include <tuple>
 #include "cpu_attach.hpp"
 #include <armadillo>
-
+#include <immintrin.h>
 #include "buffer.hpp"
 
 #include "concurrentqueue.h"
@@ -106,6 +106,8 @@ private:
     int debug_count = 0;
 
     std::unique_ptr<moodycamel::ProducerToken> task_ptok[TASK_THREAD_NUM];
+
+    myVec spm_buffer[TASK_THREAD_NUM];
 };
 
 #endif

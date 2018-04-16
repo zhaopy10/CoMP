@@ -198,8 +198,7 @@ void* PackageSender::loopSend(void *in_context)
             perror("socket sendto failed");
             exit(0);
         }
-
-
+        
         package_count++;
         if(package_count == (int)1e5)
         {

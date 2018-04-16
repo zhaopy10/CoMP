@@ -47,6 +47,9 @@ CoMP::CoMP()
     for(int i = 0; i < demul_buffer_.data.size(); i++)
         demul_buffer_.data[i].resize(OFDM_CA_NUM * UE_NUM);
 
+    for (int i = 0; i < TASK_THREAD_NUM; ++i)
+        spm_buffer[i].resize(BS_ANT_NUM);
+
     // read pilots from file
     pilots_.resize(OFDM_CA_NUM);
     FILE* fp = fopen("pilots.bin","rb");
@@ -452,14 +455,27 @@ void CoMP::doDemul(int tid, int offset)
     int frame_id = (offset_without_ca - data_subframe_id) / (subframe_num_perframe - UE_NUM);
 
     //printf("do demul, %d %d %d\n", frame_id, data_subframe_id, ca_id);
-
+    __m256i index = _mm256_setr_epi64x(0, transpose_block_size/2, transpose_block_size/2 * 2, transpose_block_size/2 * 3);
+    float* tar_ptr = (float *)&data_buffer_.data[offset_without_ca][0];
+    float* temp_buffer_ptr = (float *)&spm_buffer[tid][0];
     for(int i = 0; i < demul_block_size; i++)
     {
+
+        for(int c2 = 0; c2 < BS_ANT_NUM / 4; c2++)
+        {
+            
+            int c1_base = (ca_id + i) * 2 / transpose_block_size;
+            int c1_offset = (ca_id + i) * 2 % transpose_block_size;
+            float* base_ptr = tar_ptr + c1_base * transpose_block_size * BS_ANT_NUM + c1_offset + c2 * transpose_block_size * 4;
+            __m256d t_data = _mm256_i64gather_pd((double*)base_ptr, index, 8);
+            _mm256_store_pd((double*)(temp_buffer_ptr + c2 * 8), t_data);
+        }
+
         int precoder_offset = frame_id * OFDM_CA_NUM + ca_id + i;
         cx_float* precoder_ptr = (cx_float *)precoder_buffer_.precoder[precoder_offset].data();
         cx_fmat mat_precoder(precoder_ptr, UE_NUM, BS_ANT_NUM, false);
 
-        cx_float* data_ptr = (cx_float *)(&data_buffer_.data[offset_without_ca][(ca_id + i) * BS_ANT_NUM]);
+        cx_float* data_ptr = (cx_float *)(&spm_buffer[tid][0]);
         cx_fmat mat_data(data_ptr, BS_ANT_NUM, 1, false);
 
         cx_float* demul_ptr = (cx_float *)(&demul_buffer_.data[offset_without_ca][(ca_id + i) * UE_NUM]);
@@ -468,7 +484,7 @@ void CoMP::doDemul(int tid, int offset)
         mat_demuled = mat_precoder * mat_data;
 /*
         //debug
-        if(ca_id == 0 && i == 0 && frame_id == 4 && data_subframe_id == 0)
+        if(ca_id == 640 && i == 9 && frame_id == 4 && data_subframe_id == 0)
         {
             printf("thread %d, save mat precoder\n", tid);
             FILE* fp_debug = fopen("tmpPrecoder.txt", "w");
@@ -593,10 +609,23 @@ void CoMP::doCrop(int tid, int offset)
         int data_subframe_id = subframe_id - UE_NUM;
         int frame_offset = (frame_id % TASK_BUFFER_FRAME_NUM) * data_subframe_num_perframe + data_subframe_id;
         
-        
+        /* //naive transpose
         for(int j = 0; j < OFDM_CA_NUM; j++)
         {
             data_buffer_.data[frame_offset][ant_id + j * BS_ANT_NUM] = fft_buffer_.FFT_outputs[FFT_buffer_target_id][j];
+        }
+        */
+        // block transpose
+        float* src_ptr = (float *)&fft_buffer_.FFT_outputs[FFT_buffer_target_id][0];
+        float* tar_ptr = (float *)&data_buffer_.data[frame_offset][0];
+        for(int c2 = 0; c2 < OFDM_CA_NUM / transpose_block_size * 2; c2++)
+        {
+            for(int c3 = 0; c3 < transpose_block_size / 8; c3++)
+            {
+                __m256 data = _mm256_load_ps(src_ptr + c2 * transpose_block_size + c3 * 8);
+                _mm256_store_ps(tar_ptr + c2 * BS_ANT_NUM * transpose_block_size + transpose_block_size * ant_id + c3 * 8, data);
+            }
+            
         }
         
     }

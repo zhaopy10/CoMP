@@ -1,7 +1,7 @@
 #ifndef BUFFER_HEAD
 #define BUFFER_HEAD
 
-//#include <boost/align/aligned_allocator.hpp>
+#include <boost/align/aligned_allocator.hpp>
 
 
 struct complex_float {
@@ -10,8 +10,8 @@ struct complex_float {
 };
 
 
-typedef std::vector<complex_float> myVec;
-//typedef std::vector<complex_float, boost::alignment::aligned_allocator<complex_float, 32>> myVec;
+//typedef std::vector<complex_float> myVec;
+typedef std::vector<complex_float, boost::alignment::aligned_allocator<complex_float, 32>> myVec;
 
 struct Event_data
 {
