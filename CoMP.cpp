@@ -1,12 +1,19 @@
 #include "CoMP.hpp"
 
+using namespace arma;
+typedef cx_float COMPLEX;
+
 CoMP::CoMP()
 {
+    printf("enter constructor\n");
     // initialize socket buffer
-    socket_buffer_.buffer.resize(PackageReceiver::package_length 
-        * subframe_num_perframe * BS_ANT_NUM * SOCKET_BUFFER_FRAME_NUM); // buffer entire frame
-    socket_buffer_.buffer_status.resize(subframe_num_perframe * BS_ANT_NUM * SOCKET_BUFFER_FRAME_NUM);
-
+    for(int i = 0; i < SOCKET_THREAD_NUM; i++)
+    {
+        socket_buffer_[i].buffer.resize(PackageReceiver::package_length 
+            * subframe_num_perframe * BS_ANT_NUM * SOCKET_BUFFER_FRAME_NUM); // buffer entire frame
+        socket_buffer_[i].buffer_status.resize(subframe_num_perframe * BS_ANT_NUM * SOCKET_BUFFER_FRAME_NUM);
+    }
+    printf("initialize buffers\n");
     // initialize FFT buffer
     int FFT_buffer_block_num = BS_ANT_NUM * subframe_num_perframe * TASK_BUFFER_FRAME_NUM;
     fft_buffer_.FFT_inputs = new complex_float*[FFT_buffer_block_num];
@@ -20,46 +27,49 @@ CoMP::CoMP()
     {
         muplans_[i] = mufft_create_plan_1d_c2c(OFDM_CA_NUM, MUFFT_FORWARD, MUFFT_FLAG_CPU_ANY);
     }
+    // initialize CSI buffer
+    csi_buffer_.CSI.resize(OFDM_CA_NUM * TASK_BUFFER_FRAME_NUM);
+    for(int i = 0; i < csi_buffer_.CSI.size(); i++)
+        csi_buffer_.CSI[i].resize(BS_ANT_NUM * UE_NUM);
 
+    // initialize data buffer
+    data_buffer_.data.resize(data_subframe_num_perframe * TASK_BUFFER_FRAME_NUM);
+    for(int i = 0; i < data_buffer_.data.size(); i++)
+        data_buffer_.data[i].resize(BS_ANT_NUM * OFDM_CA_NUM);
 
-    // initialize pipes
-    pipe(pipe_socket_);
-    //fcntl(pipe_socket_[0], F_SETFL, fcntl(pipe_socket_[0], F_GETFL, 0) | O_NONBLOCK);           // non-blocking pipe
-    //fcntl(pipe_socket_[1], F_SETFL, fcntl(pipe_socket_[1], F_GETFL, 0) | O_NONBLOCK);
-    receiver_.reset(new PackageReceiver(pipe_socket_));
+    // initialize precoder buffer
+    precoder_buffer_.precoder.resize(OFDM_CA_NUM * TASK_BUFFER_FRAME_NUM);
+    for(int i = 0; i < precoder_buffer_.precoder.size(); i++)
+        precoder_buffer_.precoder[i].resize(UE_NUM * BS_ANT_NUM);
 
-    for(int i = 0; i < TASK_THREAD_NUM; i++)
-    {
-        pipe(pipe_task_[i]);
-        pipe(pipe_task_finish_[i]);
-        //fcntl(pipe_task_[i][0], F_SETFL, fcntl(pipe_task_[i][0], F_GETFL, 0) | O_NONBLOCK);           // non-blocking pipe
-        //fcntl(pipe_task_[i][1], F_SETFL, fcntl(pipe_task_[i][1], F_GETFL, 0) | O_NONBLOCK);
-    }
+    // initialize demultiplexed data buffer
+    demul_buffer_.data.resize(data_subframe_num_perframe * TASK_BUFFER_FRAME_NUM);
+    for(int i = 0; i < demul_buffer_.data.size(); i++)
+        demul_buffer_.data[i].resize(OFDM_CA_NUM * UE_NUM);
+
+    for (int i = 0; i < TASK_THREAD_NUM; ++i)
+        spm_buffer[i].resize(BS_ANT_NUM);
+
+    // read pilots from file
+    pilots_.resize(OFDM_CA_NUM);
+    FILE* fp = fopen("pilots.bin","rb");
+    fread(pilots_.data(), sizeof(float), OFDM_CA_NUM * 2, fp);
+    fclose(fp);
+
+    printf("new PackageReceiver\n");
+    receiver_.reset(new PackageReceiver(SOCKET_THREAD_NUM, &message_queue_));
 
     
-    epoll_fd = epoll_create(MAX_EVENT_NUM);
-    // Setup the event 0 for package receiver
-    event[0].events = EPOLLIN;
-    event[0].data.fd = pipe_socket_[0];
-    epoll_ctl( epoll_fd, EPOLL_CTL_ADD, pipe_socket_[0], &event[0]); 
-    for(int i = 1; i < MAX_EVENT_NUM; i++)
-    {
-        event[i].events = EPOLLIN;
-        event[i].data.fd = pipe_task_finish_[i-1][0];
-        epoll_ctl( epoll_fd, EPOLL_CTL_ADD, pipe_task_finish_[i-1][0], &event[i]); 
-    }
-
-    // task side
-    for(int i = 0; i < TASK_THREAD_NUM; i++)
-    {
-        epoll_fd_task_side[i] = epoll_create(1);
-        event_task_side[i].events = EPOLLIN;
-        event_task_side[i].data.fd = pipe_task_[i][0]; // port 0 at task threads
-        epoll_ctl( epoll_fd_task_side[i], EPOLL_CTL_ADD, pipe_task_[i][0], &event_task_side[i]); 
-    }
-    
-    memset(cropper_checker_, 0, sizeof(int) * subframe_num_perframe);
+    memset(cropper_checker_, 0, sizeof(int) * subframe_num_perframe * TASK_BUFFER_FRAME_NUM);
+    memset(csi_checker_, 0, sizeof(int) * TASK_BUFFER_FRAME_NUM);
     memset(task_status_, 0, sizeof(bool) * TASK_THREAD_NUM); 
+    memset(data_checker_, 0, sizeof(int) * TASK_BUFFER_FRAME_NUM); 
+    memset(precoder_checker_, 0, sizeof(int) * TASK_BUFFER_FRAME_NUM); 
+    memset(precoder_status_, 0, sizeof(bool) * TASK_BUFFER_FRAME_NUM); 
+    for(int i = 0; i < TASK_BUFFER_FRAME_NUM; i++)
+    {
+        memset(demul_checker_[i], 0, sizeof(int) * (subframe_num_perframe - UE_NUM));
+    }
 
     // create
     for(int i = 0; i < TASK_THREAD_NUM; i++)
@@ -92,120 +102,274 @@ CoMP::~CoMP()
 
 void CoMP::start()
 {
-    pthread_t recv_thread = receiver_->startRecv(socket_buffer_.buffer.data(), 
-        socket_buffer_.buffer_status.data(), socket_buffer_.buffer_status.size(), socket_buffer_.buffer.size());
-    // event loop
-    struct epoll_event ev[MAX_EVENT_NUM];
-    int nfds;
+    
+#ifdef ENABLE_CPU_ATTACH
+    if(stick_this_thread_to_core(0) != 0)
+    {
+        perror("stitch main thread to core 0 failed");
+        exit(0);
+    }
+#endif
+    // attach to core 1, but if ENABLE_CPU_ATTACH is not defined, it does not work
+    char* socket_buffer_ptrs[SOCKET_THREAD_NUM];
+    int* socket_buffer_status_ptrs[SOCKET_THREAD_NUM];
+    for(int i = 0; i < SOCKET_THREAD_NUM; i++)
+    {
+        socket_buffer_ptrs[i] = socket_buffer_[i].buffer.data();
+        socket_buffer_status_ptrs[i] = socket_buffer_[i].buffer_status.data();
+    }
+    std::vector<pthread_t> recv_thread = receiver_->startRecv(socket_buffer_ptrs, 
+        socket_buffer_status_ptrs, socket_buffer_[0].buffer_status.size(), socket_buffer_[0].buffer.size(), 1);
+
+    moodycamel::ProducerToken ptok(task_queue_);
+    moodycamel::ConsumerToken ctok(message_queue_);
+
+    int demul_count = 0;
+    auto demul_begin = std::chrono::system_clock::now();
+    int miss_count = 0;
+    int total_count = 0;
+
+    Event_data events_list[dequeue_bulk_size];
+    int ret = 0;
     while(true)
     {
-        
-        nfds = epoll_wait(epoll_fd, ev, MAX_EPOLL_EVENTS_PER_RUN, -1);
-        if(nfds < 0)
+        // get an event
+        ret = message_queue_.try_dequeue_bulk(ctok, events_list, dequeue_bulk_size);
+        total_count++;
+        if(total_count == 1e7)
         {
-            std::error_code ec(errno, std::system_category());
-            printf("Error in epoll_wait: %s\n", ec.message().c_str());
-            exit(0);
+            //printf("message dequeue miss rate %f\n", (float)miss_count / total_count);
+            total_count = 0;
+            miss_count = 0;
         }
-        
-        // loop each ready events
-        for(int i = 0; i < nfds; i++)
+        if(ret == 0)
         {
-            if(ev[i].data.fd == pipe_socket_[0]) // socket event
+            miss_count++;
+            continue;
+        }
+
+        for(int bulk_count = 0; bulk_count < ret; bulk_count ++)
+        {
+            Event_data& event = events_list[bulk_count];
+
+            // according to the event type
+            if(event.event_type == EVENT_PACKAGE_RECEIVED)
             {
-                //printf("get socket event\n");
-                int offset;
-                read(pipe_socket_[0], (char *)&offset, sizeof(int)); // read position
-                // find an empty thread and run
-                int tid = -1;
-                for (int i = 0; i < TASK_THREAD_NUM; ++i)
-                {
-                    if(!task_status_[i])
-                    {
-                        tid = i;
-                        break;
-                    }
-                }
-                
-                if(tid >= 0) // find a thread
-                {
-                    // write TASK_CROP and offset
-                    //printf("assign offset %d to thread %d\n", offset, tid);
-                    char tmp_data[sizeof(int) * 2];
-                    int task_id = TASK_CROP;
-                    memcpy(tmp_data, &task_id, sizeof(int));
-                    memcpy(tmp_data + sizeof(int), &(offset), sizeof(int));
-                    write(pipe_task_[tid][1], tmp_data, sizeof(int) * 2); // port 1 at main_thread end
-                    task_status_[tid] = true; // set status to busy
-                }
-                else // all thread are running
-                {
-                    cropWaitList.push(offset);
-                }
-                
-            }
-            else // task event
-            {
-                //printf("get task event\n");
-                int tid = 0;
-                while(ev[i].data.fd != pipe_task_finish_[tid][0]) // find tid
-                {
-                    tid++;
-                }
-                //printf("tid %d finished\n", tid);
-                task_status_[tid] = false; // now free
-                // the data length should be the same for all kinds of events ????
-                char tmp_data[sizeof(int) * 2];
-                read(pipe_task_finish_[tid][0], tmp_data, sizeof(int) * 2); // read 
-                int event_id = *((int *)tmp_data);
-                if(event_id == EVENT_CROPPED)
-                {
-                    int subframe_id = *((int *)tmp_data + 1);
-                    // check subframe
-                    cropper_checker_[subframe_id] ++;
-                    if(cropper_checker_[subframe_id] == BS_ANT_NUM) // this sub-frame is finished
-                    {
-                        //printf("subframe_id %d finished\n", subframe_id);
-                        cropper_checker_[subframe_id] = 0;
-                        // TODO: assign further tasks
-                    }
-                    else
-                    {
-                        // find a task in the waiting list
-                        if(cropWaitList.size() > 0) // not empty
-                        {
-                            if(cropWaitList.size() > max_queue_delay)
-                            {
-                                max_queue_delay = cropWaitList.size();
-                                printf("maximum wait list length %d\n", cropWaitList.size());
-                            }
-                            
-                            int offset = cropWaitList.front();
-                            cropWaitList.pop();
-                            char tmp_data_for_crop[sizeof(int) * 2];
-                            int task_id_for_crop = TASK_CROP;
-                            memcpy(tmp_data_for_crop, &task_id_for_crop, sizeof(int));
-                            memcpy(tmp_data_for_crop + sizeof(int), &(offset), sizeof(int));
-                            write(pipe_task_[tid][1], tmp_data_for_crop, sizeof(int) * 2); // port 1 at main_thread end
-                        }
+                int offset = event.data;
+                Event_data do_crop_task;
+                do_crop_task.event_type = TASK_CROP;
+                do_crop_task.data = offset;
+                if ( !task_queue_.try_enqueue(ptok, do_crop_task ) ) {
+                    printf("need more memory\n");
+                    if ( !task_queue_.enqueue(ptok, do_crop_task ) ) {
+                        printf("crop task enqueue failed\n");
+                        exit(0);
                     }
                 }
 
                 
             }
-            
+            else if(event.event_type == EVENT_CROPPED)
+            {
+                int FFT_buffer_target_id = event.data;
+                // check subframe
+                int frame_id, subframe_id, ant_id;
+                //splitFFTBufferIndex(FFT_buffer_target_id, &frame_id, &subframe_id, &ant_id);
+                splitSubframeBufferIndex(FFT_buffer_target_id, &frame_id, &subframe_id);
+                       
+                int cropper_checker_id = frame_id * subframe_num_perframe + subframe_id;
+                cropper_checker_[cropper_checker_id] ++;
+
+                if(cropper_checker_[cropper_checker_id] == BS_ANT_NUM) // this sub-frame is finished
+                {
+                    //printf("subframe %d, frame %d\n", subframe_id, frame_id);
+
+                    cropper_checker_[cropper_checker_id] = 0; // this subframe is finished
+                    if(isPilot(subframe_id))
+                    {
+                        int csi_checker_id = frame_id;
+                        csi_checker_[csi_checker_id] ++;
+                        if(csi_checker_[csi_checker_id] == UE_NUM)
+                        {
+                            csi_checker_[csi_checker_id] = 0;
+                            //if(frame_id == 4)
+                            //    printf("Frame %d, csi ready, assign ZF\n", frame_id);
+                            
+                            Event_data do_ZF_task;
+                            do_ZF_task.event_type = TASK_ZF;
+                            for(int i = 0; i < OFDM_CA_NUM; i++)
+                            {
+                                int csi_offset_id = frame_id * OFDM_CA_NUM + i;
+                                do_ZF_task.data = csi_offset_id;
+                                if ( !task_queue_.try_enqueue(ptok, do_ZF_task ) ) {
+                                    printf("need more memory\n");
+                                    if ( !task_queue_.enqueue(ptok, do_ZF_task ) ) {
+                                        printf("ZF task enqueue failed\n");
+                                        exit(0);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    else if(isData(subframe_id))
+                    {
+                        int data_checker_id = frame_id;
+                        data_checker_[data_checker_id] ++;
+                        if(data_checker_[data_checker_id] == data_subframe_num_perframe)
+                        {
+                            //printf("do demul for frame %d\n", frame_id);
+                            //printf("frame %d data received\n", frame_id);
+                            data_checker_[data_checker_id] = 0;
+                            // just forget check, and optimize it later
+                            Event_data do_demul_task;
+                            do_demul_task.event_type = TASK_DEMUL;
+                            for(int j = 0; j < data_subframe_num_perframe; j++)
+                            {
+                                for(int i = 0; i < OFDM_CA_NUM / demul_block_size; i++)
+                                {
+                                    int demul_offset_id = frame_id * OFDM_CA_NUM * data_subframe_num_perframe
+                                        + j * OFDM_CA_NUM + i * demul_block_size;
+                                    do_demul_task.data = demul_offset_id;
+                                    if ( !task_queue_.try_enqueue(ptok, do_demul_task ) ) {
+                                        printf("need more memory\n");
+                                        if ( !task_queue_.enqueue(ptok, do_demul_task ) ) {
+                                            printf("Demultiplexing task enqueue failed\n");
+                                            exit(0);
+                                        }
+                                    }
+                                }
+                            }
+                        }     
+                    }
+                }
+            }
+            else if(event.event_type == EVENT_ZF)
+            {
+                //printf("get ZF event\n");
+                int offset_zf = event.data;
+                // precoder is ready, do demodulation
+                int ca_id = offset_zf % OFDM_CA_NUM;
+                int frame_id = (offset_zf - ca_id) / OFDM_CA_NUM;
+                precoder_checker_[frame_id] ++;
+                if(precoder_checker_[frame_id] == OFDM_CA_NUM)
+                {
+                    precoder_checker_[frame_id] = 0;
+                    precoder_status_[frame_id] = true;
+                    //if(frame_id == 0)
+                    //    printf("frame %d precoder ready\n", frame_id);
+                }
+            }
+            else if(event.event_type == EVENT_DEMUL)
+            {
+                //printf("get demul event\n");
+                // do nothing
+                int offset_demul = event.data;
+                int ca_id = offset_demul % OFDM_CA_NUM;
+                int offset_without_ca = (offset_demul - ca_id) / OFDM_CA_NUM;
+                int data_subframe_id = offset_without_ca % (subframe_num_perframe - UE_NUM);
+                int frame_id = (offset_without_ca - data_subframe_id) / (subframe_num_perframe - UE_NUM);
+                demul_checker_[frame_id][data_subframe_id] += demul_block_size;
+                if(demul_checker_[frame_id][data_subframe_id] == OFDM_CA_NUM)
+                {
+                    demul_checker_[frame_id][data_subframe_id] = 0;
+                    /*
+                    // debug
+                    if(frame_id == 4 && data_subframe_id == 4)
+                    {
+                        printf("save demul data\n");
+                        FILE* fp = fopen("ver_data.txt","w");
+                        for(int cc = 0; cc < OFDM_CA_NUM; cc++)
+                        {
+                            complex_float* cx = &demul_buffer_.data[offset_without_ca][cc * UE_NUM];
+                            for(int kk = 0; kk < UE_NUM; kk++)  
+                                fprintf(fp, "%f %f\n", cx[kk].real, cx[kk].imag);
+                        }
+                        fclose(fp);
+                        exit(0);
+                    }
+                    */
+
+                    demul_count += 1;
+                    if(demul_count == data_subframe_num_perframe * 20)
+                    {
+                        demul_count = 0;
+                        auto demul_end = std::chrono::system_clock::now();
+                        std::chrono::duration<double> diff = demul_end - demul_begin;
+                        int samples_num_per_UE = OFDM_CA_NUM * data_subframe_num_perframe * 20;
+                        printf("Receive %d samples (per-client) from %d clients in %f secs, throughtput %f bps per-client (16QAM), current task queue length %d\n", 
+                            samples_num_per_UE, UE_NUM, diff.count(), samples_num_per_UE * log2(16.0f) / diff.count(), task_queue_.size_approx());
+                        demul_begin = std::chrono::system_clock::now();
+                    }
+                }
+            }
+
         }
-        
-        
-        
     }
+
+    
 }
 
 void* CoMP::taskThread(void* context)
 {
+    
     CoMP* obj_ptr = ((EventHandlerContext *)context)->obj_ptr;
+    moodycamel::ConcurrentQueue<Event_data>* task_queue_ = &(obj_ptr->task_queue_);
     int tid = ((EventHandlerContext *)context)->id;
     printf("task thread %d starts\n", tid);
+
+#ifdef ENABLE_CPU_ATTACH
+    int offset_id = SOCKET_THREAD_NUM + 1;
+    int tar_core_id = tid + offset_id;
+    if(tar_core_id >= 18)
+        tar_core_id = (tar_core_id - 18) + 36;
+    if(stick_this_thread_to_core(tar_core_id) != 0)
+    {
+        printf("stitch thread %d to core %d failed\n", tid, tar_core_id);
+        exit(0);
+    }
+#endif
+
+    obj_ptr->task_ptok[tid].reset(new moodycamel::ProducerToken(obj_ptr->message_queue_));
+
+    int total_count = 0;
+    int miss_count = 0;
+    Event_data event;
+    bool ret = false;
+    while(true)
+    {
+        ret = task_queue_->try_dequeue(event);
+        if(tid == 0)
+            total_count++;
+        if(tid == 0 && total_count == 1e6)
+        {
+            //printf("thread 0 task dequeue miss rate %f, queue length %d\n", (float)miss_count / total_count, task_queue_->size_approx());
+            total_count = 0;
+            miss_count = 0;
+        }
+        if(!ret)
+        {
+            if(tid == 0)
+                miss_count++;
+            continue;
+        }
+
+
+        if(event.event_type == TASK_CROP)
+        {   
+            obj_ptr->doCrop(tid, event.data);
+        }
+        else if(event.event_type == TASK_ZF)
+        {
+            obj_ptr->doZF(tid, event.data);
+        }
+        else if(event.event_type == TASK_DEMUL)
+        {
+            obj_ptr->doDemul(tid, event.data);
+        }
+        
+    }
+
+    /*
 
     int task_epoll_fd = obj_ptr->epoll_fd_task_side[tid];
     // wait for event
@@ -226,18 +390,22 @@ void* CoMP::taskThread(void* context)
         // the data length should be the same for all kinds of tasks????
         read(ev.data.fd, data_from_main, sizeof(int) * 2); 
         task_id = *((int *)data_from_main);
+        int offset;
+        offset = *((int *)data_from_main + 1);
         if(task_id == TASK_CROP)
-        {
-            int offset;
-            offset = *((int *)data_from_main + 1);
-            //printf("thread %d task_id %d, offset %d\n", tid, task_id, offset);
+        {   
             obj_ptr->doCrop(tid, offset);
+        }
+        else if(task_id == TASK_ZF)
+        {
+            obj_ptr->doZF(tid, offset);
         }
         else
         {
 
         }
     }
+    */
 }
 
 inline int CoMP::getFFTBufferIndex(int frame_id, int subframe_id, int ant_id)
@@ -246,10 +414,157 @@ inline int CoMP::getFFTBufferIndex(int frame_id, int subframe_id, int ant_id)
     return frame_id * (BS_ANT_NUM * subframe_num_perframe) + subframe_id * BS_ANT_NUM + ant_id;
 }
 
+inline int CoMP::getSubframeBufferIndex(int frame_id, int subframe_id)
+{
+    frame_id = frame_id % TASK_BUFFER_FRAME_NUM;
+    return frame_id * subframe_num_perframe + subframe_id;
+}
+
+inline void CoMP::splitSubframeBufferIndex(int FFT_buffer_target_id, int *frame_id, int *subframe_id)
+{
+    (*frame_id) = FFT_buffer_target_id / subframe_num_perframe;
+    (*subframe_id) = FFT_buffer_target_id - (*frame_id) * subframe_num_perframe;
+}
+
+
+inline void CoMP::splitFFTBufferIndex(int FFT_buffer_target_id, int *frame_id, int *subframe_id, int *ant_id)
+{
+    (*frame_id) = FFT_buffer_target_id / (BS_ANT_NUM * subframe_num_perframe);
+    FFT_buffer_target_id = FFT_buffer_target_id - (*frame_id) * (BS_ANT_NUM * subframe_num_perframe);
+    (*subframe_id) = FFT_buffer_target_id / BS_ANT_NUM;
+    (*ant_id) = FFT_buffer_target_id - *subframe_id * BS_ANT_NUM;
+}
+
+inline complex_float CoMP::divide(complex_float e1, complex_float e2)
+{
+    complex_float re;
+    float module = e2.real * e2.real + e2.imag * e2.imag;
+    re.real = (e1.real * e2.real + e1.imag * e2.imag) / module;
+    re.imag = (e1.imag * e2.real - e1.real * e2.imag) / module;
+    return re;
+}
+
+void CoMP::doDemul(int tid, int offset)
+{
+    
+    //int demul_offset_id = frame_id * OFDM_CA_NUM * (subframe_num_perframe - UE_NUM)
+    //                                + j * OFDM_CA_NUM + i;
+    int ca_id = offset % OFDM_CA_NUM;
+    int offset_without_ca = (offset - ca_id) / OFDM_CA_NUM;
+    int data_subframe_id = offset_without_ca % (subframe_num_perframe - UE_NUM);
+    int frame_id = (offset_without_ca - data_subframe_id) / (subframe_num_perframe - UE_NUM);
+
+    //printf("do demul, %d %d %d\n", frame_id, data_subframe_id, ca_id);
+    __m256i index = _mm256_setr_epi64x(0, transpose_block_size/2, transpose_block_size/2 * 2, transpose_block_size/2 * 3);
+    float* tar_ptr = (float *)&data_buffer_.data[offset_without_ca][0];
+    float* temp_buffer_ptr = (float *)&spm_buffer[tid][0];
+    for(int i = 0; i < demul_block_size; i++)
+    {
+
+        for(int c2 = 0; c2 < BS_ANT_NUM / 4; c2++)
+        {
+            
+            int c1_base = (ca_id + i) * 2 / transpose_block_size;
+            int c1_offset = (ca_id + i) * 2 % transpose_block_size;
+            float* base_ptr = tar_ptr + c1_base * transpose_block_size * BS_ANT_NUM + c1_offset + c2 * transpose_block_size * 4;
+            __m256d t_data = _mm256_i64gather_pd((double*)base_ptr, index, 8);
+            _mm256_store_pd((double*)(temp_buffer_ptr + c2 * 8), t_data);
+        }
+
+        int precoder_offset = frame_id * OFDM_CA_NUM + ca_id + i;
+        cx_float* precoder_ptr = (cx_float *)precoder_buffer_.precoder[precoder_offset].data();
+        cx_fmat mat_precoder(precoder_ptr, UE_NUM, BS_ANT_NUM, false);
+
+        cx_float* data_ptr = (cx_float *)(&spm_buffer[tid][0]);
+        cx_fmat mat_data(data_ptr, BS_ANT_NUM, 1, false);
+
+        cx_float* demul_ptr = (cx_float *)(&demul_buffer_.data[offset_without_ca][(ca_id + i) * UE_NUM]);
+        cx_fmat mat_demuled(demul_ptr, UE_NUM, 1, false);
+
+        mat_demuled = mat_precoder * mat_data;
+/*
+        //debug
+        if(ca_id == 640 && i == 9 && frame_id == 4 && data_subframe_id == 0)
+        {
+            printf("thread %d, save mat precoder\n", tid);
+            FILE* fp_debug = fopen("tmpPrecoder.txt", "w");
+            for(int i = 0; i < UE_NUM; i++)
+            {
+                for(int j = 0; j < BS_ANT_NUM; j++)
+                    fprintf(fp_debug, "%f %f ", mat_precoder.at(i,j).real(), mat_precoder.at(i,j).imag());
+                fprintf(fp_debug, "\n" );
+            }
+            fclose(fp_debug);
+
+            fp_debug = fopen("tmpData.txt","w");
+            for(int i = 0; i < BS_ANT_NUM; i++)
+                fprintf(fp_debug, "%f %f\n", mat_data.at(i,0).real(), mat_data.at(i,0).imag());
+            fclose(fp_debug);
+
+            fp_debug = fopen("tmpDemul.txt","w");
+            for(int i = 0; i < UE_NUM; i++)
+                fprintf(fp_debug, "%f %f\n", mat_demuled.at(i,0).real(), mat_demuled.at(i,0).imag());
+            fclose(fp_debug);
+            
+            exit(0);
+        }
+*/
+
+    }
+
+    
+
+    
+    
+    
+
+    // inform main thread
+    Event_data demul_finish_event;
+    demul_finish_event.event_type = EVENT_DEMUL;
+    demul_finish_event.data = offset;
+    
+    if ( !message_queue_.enqueue(*task_ptok[tid], demul_finish_event ) ) {
+        printf("Demuliplexing message enqueue failed\n");
+        exit(0);
+    }
+    
+    //printf("put demul event\n");
+}
+
+
+void CoMP::doZF(int tid, int offset)
+{
+
+    int ca_id = offset % OFDM_CA_NUM;
+    int frame_id = (offset - ca_id) / OFDM_CA_NUM;
+
+
+    cx_float* ptr_in = (cx_float *)csi_buffer_.CSI[offset].data();
+    cx_fmat mat_input(ptr_in, BS_ANT_NUM, UE_NUM, false);
+    cx_float* ptr_out = (cx_float *)precoder_buffer_.precoder[offset].data();
+    cx_fmat mat_output(ptr_out, UE_NUM, BS_ANT_NUM, false);
+    
+    pinv(mat_output, mat_input, 1e-1, "dc");
+
+
+    // inform main thread
+    Event_data ZF_finish_event;
+    ZF_finish_event.event_type = EVENT_ZF;
+    ZF_finish_event.data = offset;
+
+    if ( !message_queue_.enqueue(*task_ptok[tid], ZF_finish_event ) ) {
+        printf("ZF message enqueue failed\n");
+        exit(0);
+    }
+}
+
 void CoMP::doCrop(int tid, int offset)
 {
+    int buffer_frame_num = subframe_num_perframe * BS_ANT_NUM * SOCKET_BUFFER_FRAME_NUM;
+    int buffer_id = offset / buffer_frame_num;
+    offset = offset - buffer_id * buffer_frame_num;
     // read info
-    char* cur_ptr_buffer = socket_buffer_.buffer.data() + offset * PackageReceiver::package_length;
+    char* cur_ptr_buffer = socket_buffer_[buffer_id].buffer.data() + offset * PackageReceiver::package_length;
     int ant_id, frame_id, subframe_id, cell_id;
     frame_id = *((int *)cur_ptr_buffer);
     subframe_id = *((int *)cur_ptr_buffer + 1);
@@ -259,9 +574,15 @@ void CoMP::doCrop(int tid, int offset)
     // remove CP, do FFT
     int delay_offset = 0;
     int FFT_buffer_target_id = getFFTBufferIndex(frame_id, subframe_id, ant_id);
-    memcpy((char *)fft_buffer_.FFT_inputs[FFT_buffer_target_id], 
-        cur_ptr_buffer + sizeof(int) * 4 + (OFDM_PREFIX_LEN + delay_offset) * 2 * sizeof(float), 
-        sizeof(float) * (OFDM_CA_NUM - delay_offset) * 2); // COPY
+
+    // transfer ushort to float
+    ushort* cur_ptr_buffer_ushort = (ushort*)(cur_ptr_buffer + sizeof(int) * 4);
+    float* cur_fft_buffer_float = (float*)fft_buffer_.FFT_inputs[FFT_buffer_target_id];
+    for(int i = 0; i < (OFDM_CA_NUM - delay_offset) * 2; i++)
+        cur_fft_buffer_float[i] = (cur_ptr_buffer_ushort[OFDM_PREFIX_LEN + delay_offset + i] / 65536.f - 0.5f) * 4.f;
+    //memcpy((char *)fft_buffer_.FFT_inputs[FFT_buffer_target_id], 
+    //    cur_ptr_buffer + sizeof(int) * 4 + (OFDM_PREFIX_LEN + delay_offset) * 2 * sizeof(float), 
+    //    sizeof(float) * (OFDM_CA_NUM - delay_offset) * 2); // COPY
     if(delay_offset > 0) // append zero
     {
         memset((char *)fft_buffer_.FFT_inputs[FFT_buffer_target_id] 
@@ -271,28 +592,55 @@ void CoMP::doCrop(int tid, int offset)
     mufft_execute_plan_1d(muplans_[tid], fft_buffer_.FFT_outputs[FFT_buffer_target_id], 
         fft_buffer_.FFT_inputs[FFT_buffer_target_id]);
 
-    // debug
-/*
-    if(tid ==0)
+    // if it is pilot part, do CE
+    if(isPilot(subframe_id))
     {
-        complex_float *cur_fft_buffer_ptr = fft_buffer_.FFT_inputs[FFT_buffer_target_id];
-        for(int i = 0; i < 10; i++)
-            printf("%f + %f i\n", cur_fft_buffer_ptr[i].real, cur_fft_buffer_ptr[i].imag);
-        printf("after fft\n");
-        cur_fft_buffer_ptr = fft_buffer_.FFT_outputs[FFT_buffer_target_id];
-        for(int i = 0; i < 10; i++)
-            printf("%f + %f i\n", cur_fft_buffer_ptr[i].real, cur_fft_buffer_ptr[i].imag);
-        exit(0);
+        int UE_id = subframe_id;
+        int ca_offset = (frame_id % TASK_BUFFER_FRAME_NUM) * OFDM_CA_NUM;
+        int csi_offset = ant_id + UE_id * BS_ANT_NUM;
+        for(int j = 0; j < OFDM_CA_NUM; j++)
+        {
+            csi_buffer_.CSI[ca_offset + j][csi_offset] = divide(fft_buffer_.FFT_outputs[FFT_buffer_target_id][j], pilots_[j]);
+        }       
     }
-*/
+    else if(isData(subframe_id)) // if it is data part, just transpose
+    {
+        
+        int data_subframe_id = subframe_id - UE_NUM;
+        int frame_offset = (frame_id % TASK_BUFFER_FRAME_NUM) * data_subframe_num_perframe + data_subframe_id;
+        
+        /* //naive transpose
+        for(int j = 0; j < OFDM_CA_NUM; j++)
+        {
+            data_buffer_.data[frame_offset][ant_id + j * BS_ANT_NUM] = fft_buffer_.FFT_outputs[FFT_buffer_target_id][j];
+        }
+        */
+        // block transpose
+        float* src_ptr = (float *)&fft_buffer_.FFT_outputs[FFT_buffer_target_id][0];
+        float* tar_ptr = (float *)&data_buffer_.data[frame_offset][0];
+        for(int c2 = 0; c2 < OFDM_CA_NUM / transpose_block_size * 2; c2++)
+        {
+            for(int c3 = 0; c3 < transpose_block_size / 8; c3++)
+            {
+                __m256 data = _mm256_load_ps(src_ptr + c2 * transpose_block_size + c3 * 8);
+                _mm256_store_ps(tar_ptr + c2 * BS_ANT_NUM * transpose_block_size + transpose_block_size * ant_id + c3 * 8, data);
+            }
+            
+        }
+        
+    }
+
 
     // after finish
-    socket_buffer_.buffer_status[offset] = 0; // now empty
+    socket_buffer_[buffer_id].buffer_status[offset] = 0; // now empty
     // inform main thread
-    char tmp_data[sizeof(int) * 2];
-    int event_id = EVENT_CROPPED;
-    memcpy(tmp_data, &event_id, sizeof(int));
-    memcpy(tmp_data + sizeof(int), &(subframe_id), sizeof(int));
+    Event_data crop_finish_event;
+    crop_finish_event.event_type = EVENT_CROPPED;
+    crop_finish_event.data = getSubframeBufferIndex(frame_id, subframe_id);
 
-    write(pipe_task_finish_[tid][1], tmp_data, sizeof(int) * 2); // tell main thread crop finished
+    if ( !message_queue_.enqueue(*task_ptok[tid], crop_finish_event ) ) {
+        printf("crop message enqueue failed\n");
+        exit(0);
+    }
 }
+

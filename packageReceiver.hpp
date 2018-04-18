@@ -18,7 +18,10 @@
 #include <cassert>
 #include <unistd.h>
 #include <chrono>
+#include "buffer.hpp"
+#include "concurrentqueue.h"
 
+typedef unsigned short ushort;
 class PackageReceiver
 {
 public:
@@ -26,28 +29,38 @@ public:
     static const int OFDM_FRAME_LEN = OFDM_CA_NUM + OFDM_PREFIX_LEN;
     // int for: frame_id, subframe_id, cell_id, ant_id
     // float for: I/Q samples
-    static const int package_length = sizeof(int) * 4 + sizeof(float) * OFDM_FRAME_LEN * 2;
+    static const int package_length = sizeof(int) * 4 + sizeof(ushort) * OFDM_FRAME_LEN * 2;
     static const int data_offset = sizeof(int) * 4;
-    static const int MAX_FRAME_ID = 1e4;
+    
+    struct PackageReceiverContext
+    {
+        PackageReceiver *ptr;
+        int tid;
+    };
 
 public:
-    PackageReceiver();
-    PackageReceiver(int* in_pipe);
+    PackageReceiver(int N_THREAD = 1);
+    PackageReceiver(int N_THREAD, moodycamel::ConcurrentQueue<Event_data> * in_queue);
     ~PackageReceiver();
 
-    pthread_t startRecv(char* in_buffer, int* in_buffer_status, int in_buffer_frame_num, int in_buffer_length);
+    std::vector<pthread_t> startRecv(char** in_buffer, int** in_buffer_status, int in_buffer_frame_num, int in_buffer_length, int in_core_id=0);
     static void* loopRecv(void *context);
  
 private:
     struct sockaddr_in servaddr_;    /* server address */
-    int socket_;
+    int* socket_;
 
-    char* buffer_;
-    int* buffer_status_;
+    char** buffer_;
+    int** buffer_status_;
     int buffer_length_;
     int buffer_frame_num_;
 
-    int* pipe_;  // write at port 1
+    int thread_num_;
+
+    moodycamel::ConcurrentQueue<Event_data> *message_queue_;
+    int core_id_;
+
+    PackageReceiverContext* context;
 };
 
 

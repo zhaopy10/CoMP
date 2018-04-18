@@ -1,41 +1,55 @@
 #include "packageReceiver.hpp"
-
-
-PackageReceiver::PackageReceiver()
+#include "cpu_attach.hpp"
+//#define ENABLE_CPU_ATTACH
+PackageReceiver::PackageReceiver(int N_THREAD)
 {
-    if ((socket_ = socket(AF_INET, SOCK_DGRAM, 0)) < 0) { // UDP socket
-        printf("cannot create socket\n");
-        exit(0);
-    }
-    int rcvbufsize = sizeof(float) * OFDM_FRAME_LEN * 2 * BS_ANT_NUM * subframe_num_perframe;
-    setsockopt(socket_, SOL_SOCKET, SO_RCVBUF, &rcvbufsize, sizeof(rcvbufsize));  
-
+    socket_ = new int[N_THREAD];
     /*Configure settings in address struct*/
+    
     servaddr_.sin_family = AF_INET;
     servaddr_.sin_port = htons(7891);
     servaddr_.sin_addr.s_addr = inet_addr("127.0.0.1");
     memset(servaddr_.sin_zero, 0, sizeof(servaddr_.sin_zero));  
+    
+    for(int i = 0; i < N_THREAD; i++)
+    {
+        if ((socket_[i] = socket(AF_INET, SOCK_DGRAM, 0)) < 0) { // UDP socket
+            printf("cannot create socket %d\n", i);
+            exit(0);
+        }
 
-        /*Bind socket with address struct*/
-    if(bind(socket_, (struct sockaddr *) &servaddr_, sizeof(servaddr_)) != 0)
-        perror("socket bind failed");
+        int optval = 1;
+        setsockopt(socket_[i], SOL_SOCKET, SO_REUSEPORT, &optval, sizeof(optval));
 
+        if(bind(socket_[i], (struct sockaddr *) &servaddr_, sizeof(servaddr_)) != 0)
+        {
+            printf("socket bind failed %d\n", i);
+            exit(0);
+        }
+
+    }
+    
+
+    thread_num_ = N_THREAD;
     /* initialize random seed: */
     srand (time(NULL));
+    context = new PackageReceiverContext[thread_num_];
 
 }
 
-PackageReceiver::PackageReceiver(int* in_pipe):
-PackageReceiver()
+PackageReceiver::PackageReceiver(int N_THREAD, moodycamel::ConcurrentQueue<Event_data> * in_queue):
+PackageReceiver(N_THREAD)
 {
-    pipe_ = in_pipe;
+    message_queue_ = in_queue;
 }
 
 PackageReceiver::~PackageReceiver()
 {
+    delete[] socket_;
+    delete[] context;
 }
 
-pthread_t PackageReceiver::startRecv(char* in_buffer, int* in_buffer_status, int in_buffer_frame_num, int in_buffer_length)
+std::vector<pthread_t> PackageReceiver::startRecv(char** in_buffer, int** in_buffer_status, int in_buffer_frame_num, int in_buffer_length, int in_core_id)
 {
     // check length
     buffer_frame_num_ = in_buffer_frame_num;
@@ -44,26 +58,51 @@ pthread_t PackageReceiver::startRecv(char* in_buffer, int* in_buffer_status, int
     buffer_ = in_buffer;  // for save data
     buffer_status_ = in_buffer_status; // for save status
 
+    core_id_ = in_core_id;
     //printf("start Recv thread\n");
     // new thread
-    pthread_t recv_thread_;
-    if(pthread_create( &recv_thread_, NULL, PackageReceiver::loopRecv, (void *)this) != 0)
+    
+    std::vector<pthread_t> created_threads;
+    for(int i = 0; i < thread_num_; i++)
     {
-        perror("socket recv thread create failed");
-        exit(0);
+        pthread_t recv_thread_;
+        
+        context[i].ptr = this;
+        context[i].tid = i;
+
+        if(pthread_create( &recv_thread_, NULL, PackageReceiver::loopRecv, (void *)(&context[i])) != 0)
+        {
+            perror("socket recv thread create failed");
+            exit(0);
+        }
+        created_threads.push_back(recv_thread_);
     }
-    return recv_thread_;
+    
+    return created_threads;
 }
 
-void* PackageReceiver::loopRecv(void *context)
+void* PackageReceiver::loopRecv(void *in_context)
 {
-    printf("package receiver thread start\n");
-    PackageReceiver* obj_ptr = (PackageReceiver *)context;
-    char* buffer = obj_ptr->buffer_;
-    int* buffer_status = obj_ptr->buffer_status_;
+    PackageReceiver* obj_ptr = ((PackageReceiverContext *)in_context)->ptr;
+    int tid = ((PackageReceiverContext *)in_context)->tid;
+    printf("package receiver thread %d start\n", tid);
+
+    moodycamel::ConcurrentQueue<Event_data> *message_queue_ = obj_ptr->message_queue_;
+    int core_id = obj_ptr->core_id_;
+#ifdef ENABLE_CPU_ATTACH
+    if(stick_this_thread_to_core(core_id + tid) != 0)
+    {
+        printf("stitch thread %d to core %d failed\n", tid, core_id + tid);
+        exit(0);
+    }
+#endif
+
+    moodycamel::ProducerToken local_ptok(*message_queue_);
+
+    char* buffer = obj_ptr->buffer_[tid];
+    int* buffer_status = obj_ptr->buffer_status_[tid];
     int buffer_length = obj_ptr->buffer_length_;
     int buffer_frame_num = obj_ptr->buffer_frame_num_;
-    int* pipe = obj_ptr->pipe_;
 
     char* cur_ptr_buffer = buffer;
     int* cur_ptr_buffer_status = buffer_status;
@@ -72,17 +111,21 @@ void* PackageReceiver::loopRecv(void *context)
     int offset = 0;
     int package_num = 0;
     auto begin = std::chrono::system_clock::now();
+
+    int maxQueueLength = 0;
+    int ret = 0;
     while(true)
     {
+        
         if(cur_ptr_buffer_status[0] == 1)
         {
-            perror("buffer full");
+            printf("thread %d buffer full\n", tid);
             exit(0);
         }
-
+        
         int recvlen = -1;
         int ant_id, frame_id, subframe_id, cell_id;
-        if ((recvlen = recvfrom(obj_ptr->socket_, (char*)cur_ptr_buffer, package_length, 0, (struct sockaddr *) &obj_ptr->servaddr_, &addrlen)) < 0)
+        if ((recvlen = recvfrom(obj_ptr->socket_[tid], (char*)cur_ptr_buffer, package_length, 0, (struct sockaddr *) &obj_ptr->servaddr_, &addrlen)) < 0)
         {
             perror("recv failed");
             exit(0);
@@ -99,16 +142,25 @@ void* PackageReceiver::loopRecv(void *context)
         cur_ptr_buffer_status = buffer_status + (cur_ptr_buffer_status - buffer_status + 1) % buffer_frame_num;
         cur_ptr_buffer = buffer + (cur_ptr_buffer - buffer + package_length) % buffer_length;
 
-        // write pipe
-        write(pipe[1], (char *)&offset, sizeof(int));
+        Event_data package_message;
+        package_message.event_type = EVENT_PACKAGE_RECEIVED;
+        package_message.data = offset + tid * buffer_frame_num;
+        if ( !message_queue_->enqueue(local_ptok, package_message ) ) {
+            printf("socket message enqueue failed\n");
+            exit(0);
+        }
+        //printf("enqueue offset %d\n", offset);
+        int cur_queue_len = message_queue_->size_approx();
+        maxQueueLength = maxQueueLength > cur_queue_len ? maxQueueLength : cur_queue_len;
 
         package_num++;
         if(package_num == 1e5)
         {
             auto end = std::chrono::system_clock::now();
-            double byte_len = sizeof(float) * OFDM_FRAME_LEN * 2 * 1e5;
+            double byte_len = sizeof(ushort) * OFDM_FRAME_LEN * 2 * 1e5;
             std::chrono::duration<double> diff = end - begin;
-            printf("receive %f bytes in %f secs, throughput %f MB/s\n", byte_len, diff.count(), byte_len / diff.count() / 1024 / 1024);
+            printf("thread %d receive %f bytes in %f secs, throughput %f MB/s, max Message Queue Length %d\n", tid, byte_len, diff.count(), byte_len / diff.count() / 1024 / 1024, maxQueueLength);
+            maxQueueLength = 0;
             begin = std::chrono::system_clock::now();
             package_num = 0;
         }

@@ -1,3 +1,6 @@
+#ifndef COMP_HEAD
+#define COMP_HEAD
+
 #include "packageReceiver.hpp"
 #include <unistd.h>
 #include <memory>
@@ -10,35 +13,28 @@
 #include "mufft/fft.h"
 #include <complex.h>
 #include <math.h>
+#include <tuple>
+#include "cpu_attach.hpp"
+#include <armadillo>
+#include <immintrin.h>
+#include "buffer.hpp"
 
-struct complex_float {
-    float real;
-    float imag;
-};
-
-struct SocketBuffer
-{
-    std::vector<char> buffer;
-    std::vector<int> buffer_status;
-};
-
-struct FFTBuffer
-{
-    complex_float ** FFT_inputs;
-    complex_float ** FFT_outputs;
-};
-
-//typename struct EventHandlerContext;
+#include "concurrentqueue.h"
 
 class CoMP
 {
 public:
-    static const int MAX_EPOLL_EVENTS_PER_RUN = 1;
-    static const int TASK_THREAD_NUM = 4;
+    static const int MAX_EPOLL_EVENTS_PER_RUN = 4;
+    static const int TASK_THREAD_NUM = 28;
+    static const int SOCKET_THREAD_NUM = 7;
     static const int MAX_EVENT_NUM = TASK_THREAD_NUM + 1;
 
-    static const int SOCKET_BUFFER_FRAME_NUM = 10; // buffer 10 frames
-    static const int TASK_BUFFER_FRAME_NUM = 2;
+    static const int SOCKET_BUFFER_FRAME_NUM = 80; // buffer 10 frames
+    static const int TASK_BUFFER_FRAME_NUM = 60;
+
+    static const int demul_block_size = 32;
+    static const int transpose_block_size = 64;
+    static const int dequeue_bulk_size = 5;
 
     CoMP();
     ~CoMP();
@@ -46,6 +42,9 @@ public:
     void start();
     static void* taskThread(void* context);
     void doCrop(int tid, int offset);
+    void doZF(int tid, int offset);
+    void doDemul(int tid, int offset);
+
 
     struct EventHandlerContext
     {
@@ -53,36 +52,62 @@ public:
         int id;
     };
 
+    inline int getSubframeBufferIndex(int frame_id, int subframe_id);
+    inline void splitSubframeBufferIndex(int FFT_buffer_target_id, int *frame_id, int *subframe_id);
+
     inline int getFFTBufferIndex(int frame_id, int subframe_id, int ant_id);
+    inline void splitFFTBufferIndex(int FFT_buffer_target_id, int *frame_id, int *subframe_id, int *ant_id);
+
+    inline bool isPilot(int subframe_id) {return (subframe_id >=0) && (subframe_id < UE_NUM); }
+    inline bool isData(int subframe_id) {return (subframe_id < subframe_num_perframe) && (subframe_id >= UE_NUM); }
+
+    inline complex_float divide(complex_float e1, complex_float e2);
+
+
 
 private:
     std::unique_ptr<PackageReceiver> receiver_;
-    SocketBuffer socket_buffer_;
+    SocketBuffer socket_buffer_[SOCKET_THREAD_NUM];
     FFTBuffer fft_buffer_;
+    CSIBuffer csi_buffer_;
+    DataBuffer data_buffer_;
+    PrecoderBuffer precoder_buffer_;
+    DemulBuffer demul_buffer_;
+
+    std::vector<complex_float> pilots_;
+
     mufft_plan_1d* muplans_[TASK_THREAD_NUM];
 
-    int epoll_fd;
-    // A struct epoll_event for each process
-    struct epoll_event event[MAX_EVENT_NUM];
+    moodycamel::ConcurrentQueue<Event_data> task_queue_ = moodycamel::ConcurrentQueue<Event_data>(SOCKET_BUFFER_FRAME_NUM * subframe_num_perframe * BS_ANT_NUM  * 36);
+    moodycamel::ConcurrentQueue<Event_data> message_queue_ = moodycamel::ConcurrentQueue<Event_data>(SOCKET_BUFFER_FRAME_NUM * subframe_num_perframe * BS_ANT_NUM  * 36);
+    
 
-    int pipe_socket_[2];
-    int pipe_task_[TASK_THREAD_NUM][2]; // used to assign task
-    int pipe_task_finish_[TASK_THREAD_NUM][2]; // used to inform main thread
 
     bool task_status_[TASK_THREAD_NUM]; // can only be accessed in main_thread
-
-    int epoll_fd_task_side[TASK_THREAD_NUM];
-    struct epoll_event event_task_side[TASK_THREAD_NUM];
-
-    int cropper_checker_[subframe_num_perframe];
 
     pthread_t task_threads[TASK_THREAD_NUM];
 
     EventHandlerContext context[TASK_THREAD_NUM];
 
-    std::queue<int> cropWaitList;
+    // all checkers
+    int cropper_checker_[subframe_num_perframe * TASK_BUFFER_FRAME_NUM];
+    int csi_checker_[TASK_BUFFER_FRAME_NUM];
+    int data_checker_[TASK_BUFFER_FRAME_NUM];
+
+    int precoder_checker_[TASK_BUFFER_FRAME_NUM];
+    bool precoder_status_[TASK_BUFFER_FRAME_NUM];
+
+    int demul_checker_[TASK_BUFFER_FRAME_NUM][(subframe_num_perframe - UE_NUM)];
+
+    std::queue<std::tuple<int, int>> taskWaitList;
 
     int max_queue_delay = 0;
+
+    int debug_count = 0;
+
+    std::unique_ptr<moodycamel::ProducerToken> task_ptok[TASK_THREAD_NUM];
+
+    myVec spm_buffer[TASK_THREAD_NUM];
 };
 
-
+#endif
