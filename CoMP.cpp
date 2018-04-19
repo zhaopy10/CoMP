@@ -63,7 +63,6 @@ CoMP::CoMP()
     // initilize all kinds of checkers
     memset(cropper_checker_, 0, sizeof(int) * subframe_num_perframe * TASK_BUFFER_FRAME_NUM);
     memset(csi_checker_, 0, sizeof(int) * TASK_BUFFER_FRAME_NUM);
-    memset(task_status_, 0, sizeof(bool) * TASK_THREAD_NUM); 
     memset(data_checker_, 0, sizeof(int) * TASK_BUFFER_FRAME_NUM); 
     memset(precoder_checker_, 0, sizeof(int) * TASK_BUFFER_FRAME_NUM); 
     memset(precoder_status_, 0, sizeof(bool) * TASK_BUFFER_FRAME_NUM); 
@@ -311,7 +310,7 @@ void CoMP::start()
                         demul_count = 0;
                         auto demul_end = std::chrono::system_clock::now();
                         std::chrono::duration<double> diff = demul_end - demul_begin;
-                        int samples_num_per_UE = OFDM_CA_NUM * data_subframe_num_perframe * 20;
+                        int samples_num_per_UE = OFDM_CA_NUM * data_subframe_num_perframe * 100;
                         printf("Receive %d samples (per-client) from %d clients in %f secs, throughtput %f bps per-client (16QAM), current task queue length %d\n", 
                             samples_num_per_UE, UE_NUM, diff.count(), samples_num_per_UE * log2(16.0f) / diff.count(), task_queue_.size_approx());
                         demul_begin = std::chrono::system_clock::now();
