@@ -19,7 +19,6 @@
 #define TASK_DEMUL 2
 
 
-
 static const int subframe_num_perframe = 40;
 static const int pilot_subframe_num_perframe = UE_NUM;
 static const int data_subframe_num_perframe = subframe_num_perframe - pilot_subframe_num_perframe;

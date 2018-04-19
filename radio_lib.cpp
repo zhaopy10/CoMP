@@ -2,6 +2,7 @@
 
 RadioConfig::RadioConfig(std::vector<std::string> radioId, int numCh, double rate, 
 double freq, double rxgain, double txgain, int symlen, int symnum, int maxFrame, std::vector<int> sched):
+    _radioId(radioId), // 1 or 2
     _numCh(numCh), // 1 or 2
     _symlen(symlen),
     _symnum(symnum),
@@ -13,6 +14,8 @@ double freq, double rxgain, double txgain, int symlen, int symnum, int maxFrame,
     _tddSched(sched)
 {
     SoapySDR::Kwargs args;
+    SoapySDR::Kwargs sargs;
+    sargs["MTU"] = "1500";
     //load channels
     std::vector<size_t> channels;
     if (_numCh == 1) channels = {0};
@@ -25,6 +28,7 @@ double freq, double rxgain, double txgain, int symlen, int symnum, int maxFrame,
     }
 
     this->_radioNum = _radioId.size();
+     std::cout << "radio num is " << this->_radioNum << std::endl;
     for (int i = 0; i < this->_radioNum; i++)
     {
         args["serial"] = _radioId.at(i);
@@ -36,7 +40,7 @@ double freq, double rxgain, double txgain, int symlen, int symnum, int maxFrame,
         //use the RX only antenna, and TRX for tx
         for (auto ch : channels) baStn[i]->setAntenna(SOAPY_SDR_RX, ch, "TRX");
 
-        std::cout << "setting samples rates to " << rate/1e6 << " Msps..." << std::endl;
+        std::cout << "setting samples rates to " << _rate/1e6 << " Msps..." << std::endl;
         SoapySDR::Kwargs info = baStn[i]->getHardwareInfo();
         for (auto ch : channels)
         {
@@ -65,9 +69,10 @@ double freq, double rxgain, double txgain, int symlen, int symnum, int maxFrame,
 
             baStn[i]->setDCOffsetMode(SOAPY_SDR_RX, ch, true);
         }
-        this->rxStreams.push_back(baStn[i]->setupStream(SOAPY_SDR_RX, SOAPY_SDR_CS16, channels));
-        this->txStreams.push_back(baStn[i]->setupStream(SOAPY_SDR_TX, SOAPY_SDR_CS16, channels));
+        this->rxStreams.push_back(baStn[i]->setupStream(SOAPY_SDR_RX, SOAPY_SDR_CS16, channels, sargs));
+        this->txStreams.push_back(baStn[i]->setupStream(SOAPY_SDR_TX, SOAPY_SDR_CS16, channels, sargs));
     }
+    std::cout << "radio init done!" << std::endl;
 }
 
 void RadioConfig::radioStart(std::vector<void *> buffs)
@@ -82,15 +87,19 @@ void RadioConfig::radioStart(std::vector<void *> buffs)
         baStn[i]->writeSetting("TX_SW_DELAY", "30"); // experimentally good value for dev front-end
         baStn[i]->writeSetting("TDD_MODE", std::to_string(0x80000000));
         // write schedule
-	for (int j = 0; j < 16; j++) 
-            for(int k = 0; k < this->_symnum; k++) // symnum <= 256
-            {
-		baStn[i]->writeRegister("RFCORE", 116, j*256+k);
-		baStn[i]->writeRegister("RFCORE", 120, this->_tddSched[k]);
+	    for (int j = 0; j < 16; j++)
+            { 
+                for(int k = 0; k < this->_symnum; k++) // symnum <= 256
+                {
+	                  baStn[i]->writeRegister("RFCORE", 116, j*256+k);
+	                  baStn[i]->writeRegister("RFCORE", 120, this->_tddSched[k]);
+                }
             }
         // write beacons to FPGA buffers
         baStn[i]->writeStream(this->txStreams[i], buffs.data(), this->_symlen, flags, frameTime);
     }
+    baStn[0]->writeSetting("TRIGGER_GEN", "");
+    std::cout << "radio start done!" << std::endl;
 }
 
 void RadioConfig::radioStop()
@@ -137,12 +146,14 @@ void RadioConfig::radioSched(std::vector<int> sched)
     {
         baStn[i]->writeSetting("TDD_MODE", "0");
         // write schedule
-	for (int j = 0; j < 16; j++) 
+	for (int j = 0; j < 16; j++)
+        { 
             for(int k = 0; k < this->_symnum; k++) // symnum <= 256
             {
 		baStn[i]->writeRegister("RFCORE", 116, j*256+k);
 		baStn[i]->writeRegister("RFCORE", 120, sched[k]);
             }
+        }
         baStn[i]->writeSetting("TDD_MODE", std::to_string(0x80000000));
     }
 }

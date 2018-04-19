@@ -10,7 +10,7 @@ CoMP::CoMP()
     for(int i = 0; i < SOCKET_THREAD_NUM; i++)
     {
         socket_buffer_[i].buffer.resize(PackageReceiver::package_length 
-            * subframe_num_perframe * BS_ANT_NUM * SOCKET_BUFFER_FRAME_NUM); // buffer entire frame
+            * subframe_num_perframe * BS_ANT_NUM * SOCKET_BUFFER_FRAME_NUM); // buffer SOCKET_BUFFER_FRAME_NUM entire frame
         socket_buffer_[i].buffer_status.resize(subframe_num_perframe * BS_ANT_NUM * SOCKET_BUFFER_FRAME_NUM);
     }
     printf("initialize buffers\n");
@@ -23,6 +23,7 @@ CoMP::CoMP()
         fft_buffer_.FFT_inputs[i] = (complex_float *)mufft_alloc(OFDM_CA_NUM * sizeof(complex_float));
         fft_buffer_.FFT_outputs[i] = (complex_float *)mufft_alloc(OFDM_CA_NUM * sizeof(complex_float));
     }
+    // initialize muplans for fft
     for(int i = 0; i < TASK_THREAD_NUM; i++)
     {
         muplans_[i] = mufft_create_plan_1d_c2c(OFDM_CA_NUM, MUFFT_FORWARD, MUFFT_FLAG_CPU_ANY);
@@ -59,7 +60,7 @@ CoMP::CoMP()
     printf("new PackageReceiver\n");
     receiver_.reset(new PackageReceiver(SOCKET_THREAD_NUM, &message_queue_));
 
-    
+    // initilize all kinds of checkers
     memset(cropper_checker_, 0, sizeof(int) * subframe_num_perframe * TASK_BUFFER_FRAME_NUM);
     memset(csi_checker_, 0, sizeof(int) * TASK_BUFFER_FRAME_NUM);
     memset(task_status_, 0, sizeof(bool) * TASK_THREAD_NUM); 
@@ -71,7 +72,7 @@ CoMP::CoMP()
         memset(demul_checker_[i], 0, sizeof(int) * (subframe_num_perframe - UE_NUM));
     }
 
-    // create
+    // create task thread
     for(int i = 0; i < TASK_THREAD_NUM; i++)
     {
         context[i].obj_ptr = this;
@@ -102,7 +103,7 @@ CoMP::~CoMP()
 
 void CoMP::start()
 {
-    
+    // if ENABLE_CPU_ATTACH, attach main thread to core 0
 #ifdef ENABLE_CPU_ATTACH
     if(stick_this_thread_to_core(0) != 0)
     {
@@ -110,7 +111,7 @@ void CoMP::start()
         exit(0);
     }
 #endif
-    // attach to core 1, but if ENABLE_CPU_ATTACH is not defined, it does not work
+    // creare socket buffer and socket threads
     char* socket_buffer_ptrs[SOCKET_THREAD_NUM];
     int* socket_buffer_status_ptrs[SOCKET_THREAD_NUM];
     for(int i = 0; i < SOCKET_THREAD_NUM; i++)
@@ -120,10 +121,14 @@ void CoMP::start()
     }
     std::vector<pthread_t> recv_thread = receiver_->startRecv(socket_buffer_ptrs, 
         socket_buffer_status_ptrs, socket_buffer_[0].buffer_status.size(), socket_buffer_[0].buffer.size(), 1);
-
+    // for task_queue, main thread is producer, it is single-procuder & multiple consumer
+    // for task queue
     moodycamel::ProducerToken ptok(task_queue_);
+    // for message_queue, main thread is a comsumer, it is multiple producers
+    // & single consumer for message_queue
     moodycamel::ConsumerToken ctok(message_queue_);
 
+    // counter for print log
     int demul_count = 0;
     auto demul_begin = std::chrono::system_clock::now();
     int miss_count = 0;
@@ -133,11 +138,12 @@ void CoMP::start()
     int ret = 0;
     while(true)
     {
-        // get an event
+        // get a bulk of events
         ret = message_queue_.try_dequeue_bulk(ctok, events_list, dequeue_bulk_size);
         total_count++;
         if(total_count == 1e7)
         {
+            // print the message_queue_ miss rate is needed
             //printf("message dequeue miss rate %f\n", (float)miss_count / total_count);
             total_count = 0;
             miss_count = 0;
@@ -147,12 +153,12 @@ void CoMP::start()
             miss_count++;
             continue;
         }
-
+        // handle each event
         for(int bulk_count = 0; bulk_count < ret; bulk_count ++)
         {
             Event_data& event = events_list[bulk_count];
 
-            // according to the event type
+            // if EVENT_PACKAGE_RECEIVED, do crop
             if(event.event_type == EVENT_PACKAGE_RECEIVED)
             {
                 int offset = event.data;
@@ -171,32 +177,37 @@ void CoMP::start()
             }
             else if(event.event_type == EVENT_CROPPED)
             {
+                // if EVENT_CROPPED, check if all antennas are ready, do ZF if
+                // pilot, do deMul if data
                 int FFT_buffer_target_id = event.data;
-                // check subframe
+                // get frame_id & subframe_id
                 int frame_id, subframe_id, ant_id;
-                //splitFFTBufferIndex(FFT_buffer_target_id, &frame_id, &subframe_id, &ant_id);
                 splitSubframeBufferIndex(FFT_buffer_target_id, &frame_id, &subframe_id);
-                       
+                // check if all antennas in this subframe is ready
                 int cropper_checker_id = frame_id * subframe_num_perframe + subframe_id;
                 cropper_checker_[cropper_checker_id] ++;
 
                 if(cropper_checker_[cropper_checker_id] == BS_ANT_NUM) // this sub-frame is finished
                 {
                     //printf("subframe %d, frame %d\n", subframe_id, frame_id);
-
+                    
                     cropper_checker_[cropper_checker_id] = 0; // this subframe is finished
+                    // if this subframe is pilot part
                     if(isPilot(subframe_id))
-                    {
+                    {   
+                        // check if csi of all UEs are ready
                         int csi_checker_id = frame_id;
                         csi_checker_[csi_checker_id] ++;
                         if(csi_checker_[csi_checker_id] == UE_NUM)
                         {
+                            // if CSI from all UEs are ready, do ZF
                             csi_checker_[csi_checker_id] = 0;
                             //if(frame_id == 4)
                             //    printf("Frame %d, csi ready, assign ZF\n", frame_id);
                             
                             Event_data do_ZF_task;
                             do_ZF_task.event_type = TASK_ZF;
+                            // add ZF tasks for each sub-carrier
                             for(int i = 0; i < OFDM_CA_NUM; i++)
                             {
                                 int csi_offset_id = frame_id * OFDM_CA_NUM + i;
@@ -213,16 +224,21 @@ void CoMP::start()
                     }
                     else if(isData(subframe_id))
                     {
+                        // if this subframe is data part
                         int data_checker_id = frame_id;
                         data_checker_[data_checker_id] ++;
                         if(data_checker_[data_checker_id] == data_subframe_num_perframe)
                         {
+                            // if all data part is ready. TODO: optimize the
+                            // logic, do deMul when CSI is ready, do not wait
+                            // the entire frame is ready
+                            
                             //printf("do demul for frame %d\n", frame_id);
                             //printf("frame %d data received\n", frame_id);
                             data_checker_[data_checker_id] = 0;
-                            // just forget check, and optimize it later
                             Event_data do_demul_task;
                             do_demul_task.event_type = TASK_DEMUL;
+                            // add deMul tasks
                             for(int j = 0; j < data_subframe_num_perframe; j++)
                             {
                                 for(int i = 0; i < OFDM_CA_NUM / demul_block_size; i++)
@@ -245,7 +261,7 @@ void CoMP::start()
             }
             else if(event.event_type == EVENT_ZF)
             {
-                //printf("get ZF event\n");
+                // if ZF is ready 
                 int offset_zf = event.data;
                 // precoder is ready, do demodulation
                 int ca_id = offset_zf % OFDM_CA_NUM;
@@ -254,14 +270,12 @@ void CoMP::start()
                 if(precoder_checker_[frame_id] == OFDM_CA_NUM)
                 {
                     precoder_checker_[frame_id] = 0;
+                    //TODO: this flag can be used to optimize deDemul logic
                     precoder_status_[frame_id] = true;
-                    //if(frame_id == 0)
-                    //    printf("frame %d precoder ready\n", frame_id);
                 }
             }
             else if(event.event_type == EVENT_DEMUL)
             {
-                //printf("get demul event\n");
                 // do nothing
                 int offset_demul = event.data;
                 int ca_id = offset_demul % OFDM_CA_NUM;
@@ -269,6 +283,7 @@ void CoMP::start()
                 int data_subframe_id = offset_without_ca % (subframe_num_perframe - UE_NUM);
                 int frame_id = (offset_without_ca - data_subframe_id) / (subframe_num_perframe - UE_NUM);
                 demul_checker_[frame_id][data_subframe_id] += demul_block_size;
+                // if this subframe is ready
                 if(demul_checker_[frame_id][data_subframe_id] == OFDM_CA_NUM)
                 {
                     demul_checker_[frame_id][data_subframe_id] = 0;
@@ -290,7 +305,8 @@ void CoMP::start()
                     */
 
                     demul_count += 1;
-                    if(demul_count == data_subframe_num_perframe * 20)
+                    // print log per 100 frames
+                    if(demul_count == data_subframe_num_perframe * 100)
                     {
                         demul_count = 0;
                         auto demul_end = std::chrono::system_clock::now();
@@ -316,7 +332,9 @@ void* CoMP::taskThread(void* context)
     moodycamel::ConcurrentQueue<Event_data>* task_queue_ = &(obj_ptr->task_queue_);
     int tid = ((EventHandlerContext *)context)->id;
     printf("task thread %d starts\n", tid);
-
+    
+    // attach task threads to specific cores
+    // Note: cores 0-17, 36-53 are on the same socket
 #ifdef ENABLE_CPU_ATTACH
     int offset_id = SOCKET_THREAD_NUM + 1;
     int tar_core_id = tid + offset_id;
@@ -342,6 +360,7 @@ void* CoMP::taskThread(void* context)
             total_count++;
         if(tid == 0 && total_count == 1e6)
         {
+            // print the task queue miss rate if required
             //printf("thread 0 task dequeue miss rate %f, queue length %d\n", (float)miss_count / total_count, task_queue_->size_approx());
             total_count = 0;
             miss_count = 0;
@@ -353,7 +372,7 @@ void* CoMP::taskThread(void* context)
             continue;
         }
 
-
+        // do different tasks according to task type
         if(event.event_type == TASK_CROP)
         {   
             obj_ptr->doCrop(tid, event.data);
@@ -368,44 +387,6 @@ void* CoMP::taskThread(void* context)
         }
         
     }
-
-    /*
-
-    int task_epoll_fd = obj_ptr->epoll_fd_task_side[tid];
-    // wait for event
-    struct epoll_event ev;
-    char data_from_main[1024];
-    int task_id;
-    while(true)
-    {
-        //printf("thread %d wait for event\n", tid);
-        int nfds = epoll_wait(task_epoll_fd, &ev, 1, -1);
-        if(nfds < 0)
-        {
-            std::error_code ec(errno, std::system_category());
-            printf("Error in thread %d, epoll_wait: %s\n", tid, ec.message().c_str());
-            exit(0);
-        }
-        //printf("thread %d get event\n", tid);
-        // the data length should be the same for all kinds of tasks????
-        read(ev.data.fd, data_from_main, sizeof(int) * 2); 
-        task_id = *((int *)data_from_main);
-        int offset;
-        offset = *((int *)data_from_main + 1);
-        if(task_id == TASK_CROP)
-        {   
-            obj_ptr->doCrop(tid, offset);
-        }
-        else if(task_id == TASK_ZF)
-        {
-            obj_ptr->doZF(tid, offset);
-        }
-        else
-        {
-
-        }
-    }
-    */
 }
 
 inline int CoMP::getFFTBufferIndex(int frame_id, int subframe_id, int ant_id)
@@ -446,21 +427,19 @@ inline complex_float CoMP::divide(complex_float e1, complex_float e2)
 
 void CoMP::doDemul(int tid, int offset)
 {
-    
-    //int demul_offset_id = frame_id * OFDM_CA_NUM * (subframe_num_perframe - UE_NUM)
-    //                                + j * OFDM_CA_NUM + i;
+    // get information 
     int ca_id = offset % OFDM_CA_NUM;
     int offset_without_ca = (offset - ca_id) / OFDM_CA_NUM;
     int data_subframe_id = offset_without_ca % (subframe_num_perframe - UE_NUM);
     int frame_id = (offset_without_ca - data_subframe_id) / (subframe_num_perframe - UE_NUM);
 
     //printf("do demul, %d %d %d\n", frame_id, data_subframe_id, ca_id);
+    // see the slides for more details
     __m256i index = _mm256_setr_epi64x(0, transpose_block_size/2, transpose_block_size/2 * 2, transpose_block_size/2 * 3);
     float* tar_ptr = (float *)&data_buffer_.data[offset_without_ca][0];
     float* temp_buffer_ptr = (float *)&spm_buffer[tid][0];
     for(int i = 0; i < demul_block_size; i++)
     {
-
         for(int c2 = 0; c2 < BS_ANT_NUM / 4; c2++)
         {
             
@@ -512,12 +491,6 @@ void CoMP::doDemul(int tid, int offset)
 
     }
 
-    
-
-    
-    
-    
-
     // inform main thread
     Event_data demul_finish_event;
     demul_finish_event.event_type = EVENT_DEMUL;
@@ -531,7 +504,7 @@ void CoMP::doDemul(int tid, int offset)
     //printf("put demul event\n");
 }
 
-
+// do ZF
 void CoMP::doZF(int tid, int offset)
 {
 
@@ -558,6 +531,7 @@ void CoMP::doZF(int tid, int offset)
     }
 }
 
+// do Crop
 void CoMP::doCrop(int tid, int offset)
 {
     int buffer_frame_num = subframe_num_perframe * BS_ANT_NUM * SOCKET_BUFFER_FRAME_NUM;
