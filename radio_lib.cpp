@@ -75,7 +75,7 @@ double freq, double rxgain, double txgain, int symlen, int symnum, int maxFrame,
     std::cout << "radio init done!" << std::endl;
 }
 
-void RadioConfig::radioStart(std::vector<void *> buffs)
+void RadioConfig::radioStart(void ** buffs)
 {
     int flags = SOAPY_SDR_END_BURST | SOAPY_SDR_TX_REPLAY;
     long long frameTime(0);
@@ -96,7 +96,7 @@ void RadioConfig::radioStart(std::vector<void *> buffs)
                 }
             }
         // write beacons to FPGA buffers
-        baStn[i]->writeStream(this->txStreams[i], buffs.data(), this->_symlen, flags, frameTime);
+        baStn[i]->writeStream(this->txStreams[i], buffs, this->_symlen, flags, frameTime);
     }
     baStn[0]->writeSetting("TRIGGER_GEN", "");
     std::cout << "radio start done!" << std::endl;
@@ -119,23 +119,23 @@ void RadioConfig::radioStop()
     }
 }
 
-void RadioConfig::radioTx(std::vector<void *> buffs)
+void RadioConfig::radioTx(void ** buffs)
 {
     int flags = 0;
     long long frameTime(0);
     for (int i = 0; i < this->_radioNum; i++)
     {
-        baStn[i]->writeStream(this->txStreams[i], buffs.data(), this->_symlen, flags, frameTime, 1000000);
+        baStn[i]->writeStream(this->txStreams[i], buffs, this->_symlen, flags, frameTime, 1000000);
     }
 }
 
-void RadioConfig::radioRx(std::vector<void *> buffs)
+void RadioConfig::radioRx(void ** buffs)
 {
     int flags = 0;
     long long frameTime(0);
     for (int i = 0; i < this->_radioNum; i++)
     {
-        baStn[i]->readStream(this->rxStreams[i], buffs.data(), this->_symlen, flags, frameTime, 1000000);
+        baStn[i]->readStream(this->rxStreams[i], buffs, this->_symlen, flags, frameTime, 1000000);
     }
 }
 void RadioConfig::radioSched(std::vector<int> sched)

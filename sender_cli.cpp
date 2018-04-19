@@ -53,7 +53,7 @@ int main(int argc, char const *argv[])
     buffer_beacon[0] = beacon.data();
     buffer_beacon[1] = beacon.data();
 
-    radioConfig.radioStart(buffer_beacon);
+    radioConfig.radioStart(buffer_beacon.data());
 
 
     //std::vector<float> wb_pilot;

@@ -20,7 +20,7 @@ endif ()
 message(STATUS "SoapySDR_INCLUDE_DIRS: ${SoapySDR_INCLUDE_DIRS}")
 message(STATUS "SoapySDR_LIBRARIES: ${SoapySDR_LIBRARIES}")
 include_directories(${SoapySDR_INCLUDE_DIRS})
-
+#add_definitions(-DUSE_SOCKET)
 
 add_executable(sender sender_cli.cpp packageSender.cpp cpu_attach.cpp radio_lib.cpp)
 target_link_libraries(sender -lpthread ${SoapySDR_LIBRARIES})

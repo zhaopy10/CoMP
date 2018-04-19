@@ -21,10 +21,12 @@ class RadioConfig
 {
 public:
     RadioConfig(std::vector<std::string>, int, double, double, double, double, int, int, int, std::vector<int>);
-    void radioStart(std::vector<void *> buffs);
+    void radioStart(void ** buffs);
     void radioStop();
-    void radioTx(std::vector<void *> buffs);
-    void radioRx(std::vector<void *> buffs);
+    void radioTx(void ** buffs);
+    void radioRx(void ** buffs);
+    void radioTx(int, void ** buffs);
+    void radioRx(int, void ** buffs);
     void radioSched(std::vector<int> sched);
     ~RadioConfig();
 private:

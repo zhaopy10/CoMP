@@ -26,6 +26,7 @@
 #include <chrono>
 #include "buffer.hpp"
 #include "concurrentqueue.h"
+#include "radio_lib.hpp"
 
 typedef unsigned short ushort;
 class PackageReceiver
