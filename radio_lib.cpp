@@ -16,6 +16,7 @@ double freq, double rxgain, double txgain, int symlen, int symnum, int maxFrame,
     SoapySDR::Kwargs args;
     SoapySDR::Kwargs sargs;
     sargs["MTU"] = "1500";
+    sargs["TDD"] = "";
     //load channels
     std::vector<size_t> channels;
     if (_numCh == 1) channels = {0};
@@ -129,6 +130,13 @@ void RadioConfig::radioTx(void ** buffs)
     }
 }
 
+void RadioConfig::radioTx(int r /*radio id*/, void ** buffs)
+{
+    int flags = 0;
+    long long frameTime(0);
+    baStn[r]->writeStream(this->txStreams[r], buffs, this->_symlen, flags, frameTime, 1000000);
+}
+
 void RadioConfig::radioRx(void ** buffs)
 {
     int flags = 0;
@@ -138,6 +146,15 @@ void RadioConfig::radioRx(void ** buffs)
         baStn[i]->readStream(this->rxStreams[i], buffs, this->_symlen, flags, frameTime, 1000000);
     }
 }
+
+void RadioConfig::radioRx(int r /*radio id*/, void ** buffs, long long & frameTime)
+{
+    int flags = 0;
+    if (r < this->_radioNum)
+        baStn[r]->readStream(this->rxStreams[r], buffs, this->_symlen, flags, frameTime, 1000000);
+    //std::cout << std::hex << frameTime << std::endl;
+}
+
 void RadioConfig::radioSched(std::vector<int> sched)
 {
     // make sure we can pause the framer before we rewrite schedules to avoid

@@ -62,7 +62,7 @@ public:
      * in_buffer_length: size of ring buffer
      * in_core_id: attach socket threads to {in_core_id, ..., in_core_id + N_THREAD - 1}
     */ 
-    std::vector<pthread_t> startRecv(char** in_buffer, int** in_buffer_status, int in_buffer_frame_num, int in_buffer_length, int in_core_id=0);
+    std::vector<pthread_t> startRecv(void** in_buffer, int** in_buffer_status, int in_buffer_frame_num, int in_buffer_length, int in_core_id=0);
     /**
      * receive thread
      * context: PackageReceiverContext type
@@ -73,7 +73,9 @@ private:
     struct sockaddr_in servaddr_;    /* server address */
     int* socket_;
 
-    char** buffer_;
+    RadioConfig *radioconfig_;
+
+    void** buffer_;
     int** buffer_status_;
     int buffer_length_;
     int buffer_frame_num_;

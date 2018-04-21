@@ -20,7 +20,7 @@ endif ()
 message(STATUS "SoapySDR_INCLUDE_DIRS: ${SoapySDR_INCLUDE_DIRS}")
 message(STATUS "SoapySDR_LIBRARIES: ${SoapySDR_LIBRARIES}")
 include_directories(${SoapySDR_INCLUDE_DIRS})
-#add_definitions(-DUSE_SOCKET)
+add_definitions(-DUSE_SOCKET)
 
 add_executable(sender sender_cli.cpp packageSender.cpp cpu_attach.cpp radio_lib.cpp)
 target_link_libraries(sender -lpthread ${SoapySDR_LIBRARIES})
@@ -31,6 +31,9 @@ target_link_libraries(receiver -lpthread ${SoapySDR_LIBRARIES})
 
 add_executable(CoMP main.cpp packageReceiver.cpp CoMP.cpp cpu_attach.cpp radio_lib.cpp)
 target_link_libraries(CoMP -lpthread /usr/local/lib/libmufft.a -larmadillo ${SoapySDR_LIBRARIES})
+
+add_library(mubf SHARED packageReceiver.cpp CoMP.cpp cpu_attach.cpp radio_lib.cpp)
+target_link_libraries(mubf -lpthread /usr/local/lib/libmufft.so -larmadillo ${SoapySDR_LIBRARIES}) 
 
 
 add_executable(trans testTranspose.cpp)

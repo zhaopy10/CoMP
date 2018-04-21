@@ -31,8 +31,12 @@ class CoMP
 {
 public:
     // TASK & SOCKET thread number 
-    static const int TASK_THREAD_NUM = 28;
+    static const int TASK_THREAD_NUM = 4;
+#ifdef USE_SOCKET
     static const int SOCKET_THREAD_NUM = 7;
+#else
+    static const int SOCKET_THREAD_NUM = 1; // Set this RADIO_NUM
+#endif 
     // buffer length of each socket thread
     // the actual length will be SOCKET_BUFFER_FRAME_NUM
     // * subframe_num_perframe * BS_ANT_NUM
@@ -71,8 +75,8 @@ public:
     inline int getFFTBufferIndex(int frame_id, int subframe_id, int ant_id);
     inline void splitFFTBufferIndex(int FFT_buffer_target_id, int *frame_id, int *subframe_id, int *ant_id);
     
-    inline bool isPilot(int subframe_id) {return (subframe_id >=0) && (subframe_id < UE_NUM); }
-    inline bool isData(int subframe_id) {return (subframe_id < subframe_num_perframe) && (subframe_id >= UE_NUM); }
+    inline bool isPilot(int subframe_id) {return subframe_id == 2;} //{return (subframe_id >=0) && (subframe_id < UE_NUM); }
+    inline bool isData(int subframe_id) {return subframe_id == 3;}  //{return (subframe_id < subframe_num_perframe) && (subframe_id >= UE_NUM); }
     // complex divide
     inline complex_float divide(complex_float e1, complex_float e2);
 

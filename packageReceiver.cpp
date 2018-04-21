@@ -6,8 +6,34 @@
 
 #include "packageReceiver.hpp"
 #include "cpu_attach.hpp"
+//#include "utils.hpp"
+static void loadData(char* filename, std::vector<std::complex<int16_t>> &data, int samples)
+{
+        printf("entering loadData ... \n");
+	FILE* fp = fopen(filename,"r");
+	data.resize(samples);
+	float real, imag;
+	for(int i = 0; i < samples; i++)
+	{
+		fscanf(fp, "%f %f", &real, &imag);
+                data[i] = std::complex<int16_t>(int16_t(real*32768), int16_t(imag*32768));
+	}
+
+	fclose(fp);
+}
+
+static void printVector(std::vector<std::complex<int16_t>> &data)
+{
+    for(int i = 0; i < data.size(); i++)
+    {
+        std::cout << real(data.at(i)) << " " << imag(data.at(i)) << std::endl;
+    }
+}
+
+
 PackageReceiver::PackageReceiver(int N_THREAD)
 {
+#ifdef USE_SOCKET
     socket_ = new int[N_THREAD];
     /*Configure settings in address struct*/
     // address of sender 
@@ -33,7 +59,33 @@ PackageReceiver::PackageReceiver(int N_THREAD)
         }
 
     }
-    
+#else
+
+    std::vector<std::string> bs_radio_ids;
+    // FIXME: configuration should be read from file
+    bs_radio_ids.push_back("0378");
+    int maxFrame = 1 << 31;
+    int symnum = 20;
+    int symlen = 256;
+    std::vector<int> tdd_sched(symnum);
+    std::fill(tdd_sched.begin(), tdd_sched.end(), 0);
+    tdd_sched[0] = 1;
+    tdd_sched[2] = 2;
+    tdd_sched[3] = 2;
+
+    radioconfig_ = new RadioConfig(bs_radio_ids, 2, 5e6, 915e6, 20, 50, symlen, symnum, maxFrame, tdd_sched);
+
+    // FIXME: multithread me
+    std::vector<std::complex<int16_t>> beacon;
+    loadData("beacon.txt", beacon, symlen);
+    printVector(beacon);
+    std::vector<void * > buffer_beacon(2);
+    buffer_beacon[0] = beacon.data();
+    buffer_beacon[1] = beacon.data();
+
+    radioconfig_->radioStart(buffer_beacon.data());
+
+#endif    
 
     thread_num_ = N_THREAD;
     /* initialize random seed: */
@@ -54,7 +106,7 @@ PackageReceiver::~PackageReceiver()
     delete[] context;
 }
 
-std::vector<pthread_t> PackageReceiver::startRecv(char** in_buffer, int** in_buffer_status, int in_buffer_frame_num, int in_buffer_length, int in_core_id)
+std::vector<pthread_t> PackageReceiver::startRecv(void** in_buffer, int** in_buffer_status, int in_buffer_frame_num, int in_buffer_length, int in_core_id)
 {
     // check length
     buffer_frame_num_ = in_buffer_frame_num;
@@ -106,17 +158,33 @@ void* PackageReceiver::loopRecv(void *in_context)
     // use token to speed up
     moodycamel::ProducerToken local_ptok(*message_queue_);
 
-    char* buffer = obj_ptr->buffer_[tid];
+    void* buffer = obj_ptr->buffer_[tid];
     int* buffer_status = obj_ptr->buffer_status_[tid];
     int buffer_length = obj_ptr->buffer_length_;
     int buffer_frame_num = obj_ptr->buffer_frame_num_;
 
-    char* cur_ptr_buffer = buffer;
+    void* cur_ptr_buffer = buffer;
     int* cur_ptr_buffer_status = buffer_status;
+#ifndef USE_SOCKET
+    RadioConfig *radio = obj_ptr->radioconfig_;
+    void* buffer2 = obj_ptr->buffer_[tid] + buffer_length;
+    int* buffer_status2 = obj_ptr->buffer_status_[tid] + buffer_length;
+
+    void* cur_ptr_buffer2;
+    int* cur_ptr_buffer_status2;
+    if (CH_NUM == 2)
+    {
+        cur_ptr_buffer2 = buffer2;
+        cur_ptr_buffer_status2 = buffer_status2;
+    }
+    else
+        cur_ptr_buffer2 = malloc(buffer_length); 
+#endif
     // loop recv
     socklen_t addrlen = sizeof(obj_ptr->servaddr_);
     int offset = 0;
     int package_num = 0;
+    long long frameTime;
     auto begin = std::chrono::system_clock::now();
 
     int maxQueueLength = 0;
@@ -129,9 +197,10 @@ void* PackageReceiver::loopRecv(void *in_context)
             printf("thread %d buffer full\n", tid);
             exit(0);
         }
-        // receive data
-        int recvlen = -1;
         int ant_id, frame_id, subframe_id, cell_id;
+        // receive data
+#ifdef USE_SOCKET
+        int recvlen = -1;
         if ((recvlen = recvfrom(obj_ptr->socket_[tid], (char*)cur_ptr_buffer, package_length, 0, (struct sockaddr *) &obj_ptr->servaddr_, &addrlen)) < 0)
         {
             perror("recv failed");
@@ -142,6 +211,27 @@ void* PackageReceiver::loopRecv(void *in_context)
         subframe_id = *((int *)cur_ptr_buffer + 1);
         cell_id = *((int *)cur_ptr_buffer + 2);
         ant_id = *((int *)cur_ptr_buffer + 3);
+#else
+        // this is probably a really bad implementation, and needs to be revamped
+        void * samp1 = cur_ptr_buffer + 4*sizeof(int);
+        void * samp2 = cur_ptr_buffer2 + 4*sizeof(int);
+        void *samp[2] = {samp1, samp2};
+        radio->radioRx(tid, samp, frameTime);
+        frame_id = (int)(frameTime>>32);
+        subframe_id = (int)(frameTime&0xFFFFFFFF);
+        ant_id = tid;
+        *((int *)cur_ptr_buffer) = frame_id;
+        *((int *)cur_ptr_buffer + 1) = subframe_id;
+        *((int *)cur_ptr_buffer + 2) = 0; //cell_id 
+        *((int *)cur_ptr_buffer + 3) = ant_id;
+        if (CH_NUM == 2)
+        {
+            *((int *)cur_ptr_buffer2) = frame_id;
+            *((int *)cur_ptr_buffer2 + 1) = subframe_id;
+            *((int *)cur_ptr_buffer2 + 2) = 0; //cell_id 
+            *((int *)cur_ptr_buffer2 + 3) = ant_id + 1;
+        }
+#endif
         //printf("receive frame_id %d, subframe_id %d, cell_id %d, ant_id %d\n", frame_id, subframe_id, cell_id, ant_id);
         
         // get the position in buffer
@@ -149,7 +239,7 @@ void* PackageReceiver::loopRecv(void *in_context)
         // move ptr & set status to full
         cur_ptr_buffer_status[0] = 1; // has data, after doing fft, it is set to 0
         cur_ptr_buffer_status = buffer_status + (cur_ptr_buffer_status - buffer_status + 1) % buffer_frame_num;
-        cur_ptr_buffer = buffer + (cur_ptr_buffer - buffer + package_length) % buffer_length;
+        cur_ptr_buffer = buffer + ((char*)cur_ptr_buffer - (char*)buffer + package_length) % buffer_length;
         // push EVENT_PACKAGE_RECEIVED event into the queue
         Event_data package_message;
         package_message.event_type = EVENT_PACKAGE_RECEIVED;
@@ -159,6 +249,24 @@ void* PackageReceiver::loopRecv(void *in_context)
             printf("socket message enqueue failed\n");
             exit(0);
         }
+#ifndef USE_SOCKET
+        if (CH_NUM == 2)
+        {
+            offset = cur_ptr_buffer_status2 - buffer_status2;
+            cur_ptr_buffer_status2[0] = 1; // has data, after doing fft, it is set to 0
+            cur_ptr_buffer_status2 = buffer_status2 + (cur_ptr_buffer_status2 - buffer_status2 + 1) % buffer_frame_num;
+            cur_ptr_buffer2 = buffer2 + ((char*)cur_ptr_buffer2 - (char*)buffer2 + package_length) % buffer_length;
+            // push EVENT_PACKAGE_RECEIVED event into the queue
+            Event_data package_message2;
+            package_message2.event_type = EVENT_PACKAGE_RECEIVED;
+            // data records the position of this packet in the buffer & tid of this socket (so that task thread could know which buffer it should visit) 
+            package_message2.data = offset + (tid + 1) * buffer_frame_num;
+            if ( !message_queue_->enqueue(local_ptok, package_message ) ) {
+                printf("socket message enqueue failed\n");
+                exit(0);
+            }
+        }
+#endif
         //printf("enqueue offset %d\n", offset);
         int cur_queue_len = message_queue_->size_approx();
         maxQueueLength = maxQueueLength > cur_queue_len ? maxQueueLength : cur_queue_len;
@@ -177,5 +285,5 @@ void* PackageReceiver::loopRecv(void *in_context)
             package_num = 0;
         }
     }
-
 }
+

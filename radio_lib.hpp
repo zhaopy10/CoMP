@@ -26,7 +26,7 @@ public:
     void radioTx(void ** buffs);
     void radioRx(void ** buffs);
     void radioTx(int, void ** buffs);
-    void radioRx(int, void ** buffs);
+    void radioRx(int, void ** buffs, long long & frameTime);
     void radioSched(std::vector<int> sched);
     ~RadioConfig();
 private:
